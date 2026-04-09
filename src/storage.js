@@ -36,7 +36,15 @@ import { ensureDirectoryExists } from './utils.js';
 // DynamoDB Storage
 // ---------------------------------------------------------------------------
 
+/**
+ * DynamoDB-backed storage for production use on AWS.
+ * Uses a single-table design with PK/SK key pattern.
+ */
 export class DynamoDBStorage {
+  /**
+   * @param {string} tableName - DynamoDB table name
+   * @param {string} region - AWS region
+   */
   constructor(tableName, region) {
     this.tableName = tableName;
     const client = new DynamoDBClient({ region });
@@ -44,6 +52,9 @@ export class DynamoDBStorage {
     this.allowedDomains = [];
   }
 
+  /**
+   * Verify the DynamoDB table exists and load allowed domains into memory.
+   */
   async initialize() {
     try {
       await this.docClient.send(
@@ -70,6 +81,7 @@ export class DynamoDBStorage {
     console.log(`[DynamoDBStorage] Loaded ${this.allowedDomains.length} allowed domain(s)`);
   }
 
+  /** @returns {{ domains: string, pendingCodes: string, usedCodes: string, tableName: string }} */
   getStorageInfo() {
     return {
       domains: 'DynamoDB',
@@ -79,15 +91,26 @@ export class DynamoDBStorage {
     };
   }
 
+  /** @returns {string[]} Copy of the cached allowed domains list. */
   getAllowedDomains() {
     return [...this.allowedDomains];
   }
 
+  /**
+   * Check if an email's domain is in the allowed list.
+   * @param {string} email
+   * @returns {boolean}
+   */
   isAllowedDomain(email) {
     const domain = email.split('@')[1]?.toLowerCase();
     return this.allowedDomains.includes(domain);
   }
 
+  /**
+   * Persist the allowed domains list and update the in-memory cache.
+   * @param {string[]} domains
+   * @returns {Promise<boolean>}
+   */
   async saveAllowedDomains(domains) {
     try {
       await this.docClient.send(
@@ -104,6 +127,13 @@ export class DynamoDBStorage {
     }
   }
 
+  /**
+   * Save a pending verification code.
+   * @param {string} userId - Discord user ID
+   * @param {string} email - Email address being verified
+   * @param {string} code - Generated verification code
+   * @returns {Promise<boolean>}
+   */
   async saveCodeToStorage(userId, email, code) {
     try {
       await this.docClient.send(
@@ -126,6 +156,11 @@ export class DynamoDBStorage {
     }
   }
 
+  /**
+   * Count how many times an email has been used for verification.
+   * @param {string} email
+   * @returns {Promise<number>}
+   */
   async getEmailVerificationCount(email) {
     try {
       const result = await this.docClient.send(
@@ -143,6 +178,13 @@ export class DynamoDBStorage {
     }
   }
 
+  /**
+   * Move a verification code from pending to used (marks verification complete).
+   * @param {string} userId
+   * @param {string} email
+   * @param {string} code
+   * @returns {Promise<boolean>}
+   */
   async moveToUsedCodes(userId, email, code) {
     const now = new Date().toISOString();
     try {
@@ -172,6 +214,11 @@ export class DynamoDBStorage {
     }
   }
 
+  /**
+   * Delete all verification records for an email, allowing it to be reused.
+   * @param {string} email
+   * @returns {Promise<{ success: boolean, deletedCount?: number, reason?: string }>}
+   */
   async resetEmail(email) {
     try {
       const result = await this.docClient.send(
@@ -216,7 +263,14 @@ export class DynamoDBStorage {
 // Local File Storage (for development)
 // ---------------------------------------------------------------------------
 
+/**
+ * File-based storage for local development. Stores data as JSON files
+ * in a configurable directory. No AWS credentials needed.
+ */
 export class LocalStorage {
+  /**
+   * @param {string} [baseDir] - Base directory for storage files (defaults to ./data)
+   */
   constructor(baseDir) {
     this.baseDir = baseDir || path.join(process.cwd(), 'data');
     this.domainsPath = path.join(this.baseDir, 'allowed_domains.json');
@@ -225,6 +279,9 @@ export class LocalStorage {
     this.allowedDomains = [];
   }
 
+  /**
+   * Create storage directories and load allowed domains from disk.
+   */
   async initialize() {
     ensureDirectoryExists(this.codesDir);
     ensureDirectoryExists(this.usedCodesDir);
@@ -239,6 +296,7 @@ export class LocalStorage {
     console.log(`[LocalStorage] Loaded ${this.allowedDomains.length} allowed domain(s)`);
   }
 
+  /** @returns {{ domains: string, pendingCodes: string, usedCodes: string, localDomainsPath: string, localCodesDir: string, localUsedCodesDir: string }} */
   getStorageInfo() {
     return {
       domains: 'Local',
@@ -250,15 +308,26 @@ export class LocalStorage {
     };
   }
 
+  /** @returns {string[]} Copy of the cached allowed domains list. */
   getAllowedDomains() {
     return [...this.allowedDomains];
   }
 
+  /**
+   * Check if an email's domain is in the allowed list.
+   * @param {string} email
+   * @returns {boolean}
+   */
   isAllowedDomain(email) {
     const domain = email.split('@')[1]?.toLowerCase();
     return this.allowedDomains.includes(domain);
   }
 
+  /**
+   * Persist the allowed domains list to disk and update the in-memory cache.
+   * @param {string[]} domains
+   * @returns {Promise<boolean>}
+   */
   async saveAllowedDomains(domains) {
     try {
       fs.writeFileSync(this.domainsPath, JSON.stringify(domains, null, 2));
@@ -270,6 +339,13 @@ export class LocalStorage {
     }
   }
 
+  /**
+   * Save a pending verification code as a JSON file.
+   * @param {string} userId - Discord user ID
+   * @param {string} email - Email address being verified
+   * @param {string} code - Generated verification code
+   * @returns {Promise<boolean>}
+   */
   async saveCodeToStorage(userId, email, code) {
     try {
       const filePath = path.join(this.codesDir, `${userId}.json`);
@@ -282,6 +358,11 @@ export class LocalStorage {
     }
   }
 
+  /**
+   * Count how many times an email has been used for verification.
+   * @param {string} email
+   * @returns {Promise<number>}
+   */
   async getEmailVerificationCount(email) {
     try {
       const files = fs.readdirSync(this.usedCodesDir);
@@ -300,6 +381,13 @@ export class LocalStorage {
     }
   }
 
+  /**
+   * Move a verification code from pending to used (marks verification complete).
+   * @param {string} userId
+   * @param {string} email
+   * @param {string} code
+   * @returns {Promise<boolean>}
+   */
   async moveToUsedCodes(userId, email, code) {
     try {
       const pendingPath = path.join(this.codesDir, `${userId}.json`);
@@ -318,6 +406,11 @@ export class LocalStorage {
     }
   }
 
+  /**
+   * Delete all verification records for an email, allowing it to be reused.
+   * @param {string} email
+   * @returns {Promise<{ success: boolean, deletedCount?: number, reason?: string }>}
+   */
   async resetEmail(email) {
     try {
       const files = fs.readdirSync(this.usedCodesDir);
@@ -348,6 +441,10 @@ export class LocalStorage {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Factory function — selects the storage backend based on USE_LOCAL_STORAGE config.
+ * @returns {DynamoDBStorage | LocalStorage}
+ */
 function createStorage() {
   if (USE_LOCAL_STORAGE) {
     return new LocalStorage();

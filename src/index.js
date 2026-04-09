@@ -11,6 +11,9 @@ import storage from './storage.js';
 import { registerCommands } from './commands/index.js';
 import setupEventHandlers from './events.js';
 
+/**
+ * Initialize the bot: connect storage, wire event handlers, log in, and register commands.
+ */
 async function initialize() {
   console.log('Initializing Discord Email Verification Bot...');
 

@@ -45,6 +45,10 @@ export async function handleAdminCommand(interaction) {
   }
 }
 
+/**
+ * Display current storage backend configuration.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ */
 async function handleStorageInfo(interaction) {
   const info = storage.getStorageInfo();
   let message = '**Storage Configuration**\n\n';
@@ -65,6 +69,10 @@ async function handleStorageInfo(interaction) {
   return interaction.reply({ content: message, ephemeral: true });
 }
 
+/**
+ * Add a new domain to the allowed email domains list.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ */
 async function handleDomainAdd(interaction) {
   const domain = interaction.options.getString('domain')?.toLowerCase().trim();
   if (!domain) {
@@ -91,6 +99,10 @@ async function handleDomainAdd(interaction) {
   return interaction.editReply({ content: 'Error adding domain. Please try again or check the logs.' });
 }
 
+/**
+ * Remove a domain from the allowed email domains list.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ */
 async function handleDomainRemove(interaction) {
   const domain = interaction.options.getString('domain')?.toLowerCase().trim();
   if (!domain) {
@@ -117,6 +129,10 @@ async function handleDomainRemove(interaction) {
   return interaction.editReply({ content: 'Error removing domain. Please try again or check the logs.' });
 }
 
+/**
+ * List all currently allowed email domains.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ */
 async function handleDomainList(interaction) {
   await interaction.deferReply({ ephemeral: true });
 
@@ -129,6 +145,10 @@ async function handleDomainList(interaction) {
   return interaction.editReply({ content: `**Currently Allowed Email Domains:**\n${domainList}` });
 }
 
+/**
+ * Check how many times an email has been used for verification.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ */
 async function handleCheckEmail(interaction) {
   const email = interaction.options.getString('email')?.toLowerCase().trim();
   if (!email) {
@@ -156,6 +176,10 @@ async function handleCheckEmail(interaction) {
   return interaction.editReply({ content: reply });
 }
 
+/**
+ * Reset verification records for an email, allowing it to be used again.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ */
 async function handleResetEmail(interaction) {
   const email = interaction.options.getString('email')?.toLowerCase().trim();
   if (!email) {
