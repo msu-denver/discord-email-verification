@@ -1,6 +1,6 @@
 # Discord Email Verification Bot
 
-A Discord bot that verifies members using their educational email addresses. Built for the MSU Denver CyberBridge program.
+A Discord bot that verifies members using their educational email addresses. Built for the MSU Denver Computer Science Department Discord server.
 
 ## How It Works
 
@@ -26,7 +26,8 @@ A Discord bot that verifies members using their educational email addresses. Bui
 ## Prerequisites
 
 - **Node.js** 18+ (22 recommended)
-- **AWS Account** with SES and DynamoDB access
+- **Docker** (for local email testing with LocalStack)
+- **AWS Account** with SES and DynamoDB access (production only)
 - **Discord Bot Application** created in the [Developer Portal](https://discord.com/developers/applications)
 
 ## Quick Start (Local Development)
@@ -43,8 +44,9 @@ npm install
 cp .env.example .env
 # Edit .env with your Discord and AWS credentials
 
-# For local development (no AWS needed for storage):
-# Set USE_LOCAL_STORAGE=true in .env
+# For local development, set these in .env:
+#   USE_LOCAL_STORAGE=true       (uses local JSON files instead of DynamoDB)
+#   AWS_ENDPOINT_URL=http://localhost:4566  (routes SES to LocalStack)
 
 # Run the bot
 npm start
@@ -55,6 +57,35 @@ npm test
 # Run tests with coverage
 npm run test:coverage
 ```
+
+### Local Email Testing with LocalStack
+
+To test email sending locally without a real AWS account, we use [LocalStack](https://localstack.cloud/) to simulate Amazon SES. This requires [Docker](https://www.docker.com/).
+
+```bash
+# Start the LocalStack container (simulates SES on localhost:4566)
+docker compose up -d
+
+# The seed script automatically verifies email identities for local dev.
+# You can verify it's working:
+docker exec verification-bot-localstack awslocal ses list-identities
+
+# Make sure your .env has:
+#   AWS_ENDPOINT_URL=http://localhost:4566
+#   SES_FROM_EMAIL=verification@msudenver.edu
+
+# Start the bot
+npm start
+
+# After a user runs /verify, inspect the captured email:
+docker exec verification-bot-localstack ls /var/lib/localstack/state/ses/
+docker exec verification-bot-localstack cat /var/lib/localstack/state/ses/<email-id>.json
+
+# Stop LocalStack when done
+docker compose down
+```
+
+LocalStack captures all sent emails as JSON files, so you can verify email content, formatting, and delivery without sending real emails.
 
 ## Environment Variables
 
@@ -69,6 +100,7 @@ See `.env.example` for a fully documented list. Key variables:
 | `ADMIN_ROLE_ID` | Role required for admin commands |
 | `SES_FROM_EMAIL` | Verified sender email in Amazon SES |
 | `USE_LOCAL_STORAGE` | `true` for local file storage, `false` for DynamoDB |
+| `AWS_ENDPOINT_URL` | LocalStack endpoint for local dev (e.g., `http://localhost:4566`) |
 
 ## Architecture
 
@@ -84,6 +116,15 @@ src/
     index.js        Slash command registration with Discord API
     verify.js       /verify and /verifycode handlers
     admin.js        /admin subcommand handlers
+```
+
+```
+infrastructure/
+  template.yaml     CloudFormation template for AWS deployment
+scripts/
+  localstack/
+    seed_ses.sh     Auto-seeds SES email identities for local dev
+docker-compose.yml  LocalStack container for local SES simulation
 ```
 
 ### Storage Backends
@@ -136,6 +177,10 @@ New AWS accounts start in the SES **sandbox**, which only allows sending to veri
 7. Select permissions: `Manage Roles`, `Send Messages`, `Read Message History`
 8. Open the generated URL to invite the bot to your server
 
+### Bot Role Hierarchy
+
+The bot's role must be **above** the Quarantine and Verified roles in your server's role list. Otherwise it will get a "Missing Permissions" error when trying to add/remove roles. Go to Server Settings > Roles and drag the bot's role above the roles it needs to manage.
+
 ### Getting Discord IDs
 
 Enable **Developer Mode** in Discord (User Settings > Advanced > Developer Mode), then right-click any role, channel, or server to copy its ID.
@@ -160,7 +205,7 @@ npm run test:coverage # Coverage report (target: 80%+)
 ## Credits
 
 - **Original bot**: Luke J Farchione (2025)
-- **Migration & enhancements**: MSU Denver CyberBridge (2026)
+- **Migration & enhancements**: MSU Denver CS Department (2026)
 
 ## License
 
