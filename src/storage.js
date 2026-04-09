@@ -15,16 +15,16 @@
 
 import fs from 'fs';
 import path from 'path';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import {
+import { DynamoDBClient, DescribeTableCommand } from '@aws-sdk/client-dynamodb';
+import pkg from '@aws-sdk/lib-dynamodb';
+const {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
   DeleteCommand,
   QueryCommand,
   BatchWriteCommand,
-  DescribeTableCommand,
-} from '@aws-sdk/lib-dynamodb';
+} = pkg;
 import {
   AWS_REGION,
   USE_LOCAL_STORAGE,

@@ -36,6 +36,7 @@ export const ADMIN_ROLE_ID = process.env.ADMIN_ROLE_ID;
 
 // AWS configuration
 export const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
+export const AWS_ENDPOINT_URL = process.env.AWS_ENDPOINT_URL || '';
 
 // Storage configuration
 export const USE_LOCAL_STORAGE = process.env.USE_LOCAL_STORAGE === 'true';

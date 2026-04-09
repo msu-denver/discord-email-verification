@@ -10,10 +10,16 @@
  */
 
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
-import { SES_FROM_EMAIL, SES_FROM_NAME, SERVER_NAME, AWS_REGION } from './config.js';
+import { SES_FROM_EMAIL, SES_FROM_NAME, SERVER_NAME, AWS_REGION, AWS_ENDPOINT_URL } from './config.js';
 
-// Create SES client — uses credentials from the environment / instance profile
-const sesClient = new SESClient({ region: AWS_REGION });
+// Create SES client — when AWS_ENDPOINT_URL is set (e.g. LocalStack), route there instead of real AWS
+const sesClientConfig = { region: AWS_REGION };
+if (AWS_ENDPOINT_URL) {
+  sesClientConfig.endpoint = AWS_ENDPOINT_URL;
+  sesClientConfig.credentials = { accessKeyId: 'test', secretAccessKey: 'test' };
+  console.log(`[emailer] Using LocalStack SES at ${AWS_ENDPOINT_URL}`);
+}
+const sesClient = new SESClient(sesClientConfig);
 
 /**
  * Send a verification email via Amazon SES.

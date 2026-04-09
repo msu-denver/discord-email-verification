@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack
+    container_name: verification-bot-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - DEBUG=1
+      - SERVICES=ses
+      - PERSISTENCE=1
+    volumes:
+      - "./scripts/localstack:/etc/localstack/init/ready.d"
+      - "localstack-data:/var/lib/localstack"
+    healthcheck:
+      test: ["CMD", "awslocal", "ses", "list-identities"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  localstack-data:
