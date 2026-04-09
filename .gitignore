@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Environment variables (contains secrets!)
+.env
+
+# Coverage reports
+coverage/
+
+# Local storage data (development only)
+data/
+allowed_domains.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log

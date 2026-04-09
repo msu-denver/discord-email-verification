@@ -1,0 +1,253 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Discord Email Verification Bot infrastructure for MSU Denver CyberBridge.
+  Creates DynamoDB table, SES email identity, EC2 instance, IAM role, and
+  SSM parameters for secrets.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    Description: Environment name (e.g., production, staging)
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: EC2 instance type (t3.micro is free-tier eligible)
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 key pair for SSH access
+
+  SESFromEmail:
+    Type: String
+    Description: Verified sender email address for SES (e.g., verification@msudenver.edu)
+
+  DiscordBotToken:
+    Type: String
+    NoEcho: true
+    Description: Discord bot token from the Developer Portal
+
+  ServerID:
+    Type: String
+    Description: Discord server (guild) ID
+
+  QuarantineRoleID:
+    Type: String
+    Description: Discord quarantine role ID
+
+  VerifiedRoleID:
+    Type: String
+    Description: Discord verified role ID
+
+  AdminRoleID:
+    Type: String
+    Description: Discord admin role ID
+
+  VerificationChannelID:
+    Type: String
+    Description: Discord verification channel ID
+
+  WelcomeChannelID:
+    Type: String
+    Description: Discord welcome channel ID
+
+  ServerName:
+    Type: String
+    Default: CyberBridge
+    Description: Display name used in emails and Discord messages
+
+Resources:
+
+  # -----------------------------------------------------------------------
+  # DynamoDB Table — stores allowed domains, pending codes, and used codes
+  # -----------------------------------------------------------------------
+  VerificationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'discord-verification-${EnvironmentName}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: discord-verification-bot
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # -----------------------------------------------------------------------
+  # SES Email Identity — verifies the sender email address
+  # -----------------------------------------------------------------------
+  SESEmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref SESFromEmail
+
+  # -----------------------------------------------------------------------
+  # SSM Parameters — store secrets securely (not in plaintext .env files)
+  # -----------------------------------------------------------------------
+  DiscordBotTokenParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/discord-bot/${EnvironmentName}/DISCORD_BOT_TOKEN'
+      Type: String
+      Value: !Ref DiscordBotToken
+      Description: Discord bot token
+      Tags:
+        Project: discord-verification-bot
+
+  # -----------------------------------------------------------------------
+  # IAM Role — grants EC2 access to SES, DynamoDB, and SSM
+  # -----------------------------------------------------------------------
+  BotInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'discord-bot-role-${EnvironmentName}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DiscordBotPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # SES: send verification emails
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: '*'
+              # DynamoDB: read/write verification data
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DescribeTable
+                Resource: !GetAtt VerificationTable.Arn
+              # SSM: read bot token and other secrets
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/discord-bot/${EnvironmentName}/*'
+
+  BotInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref BotInstanceRole
+
+  # -----------------------------------------------------------------------
+  # Security Group — SSH only inbound, all outbound (for Discord WebSocket)
+  # -----------------------------------------------------------------------
+  BotSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Discord verification bot
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+      Tags:
+        - Key: Name
+          Value: !Sub 'discord-bot-sg-${EnvironmentName}'
+
+  # -----------------------------------------------------------------------
+  # EC2 Instance — runs the bot with PM2
+  # -----------------------------------------------------------------------
+  BotInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      IamInstanceProfile: !Ref BotInstanceProfile
+      SecurityGroups:
+        - !Ref BotSecurityGroup
+      # Amazon Linux 2023 — latest x86_64 AMI (resolved at deploy time)
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      Tags:
+        - Key: Name
+          Value: !Sub 'discord-verification-bot-${EnvironmentName}'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          # Update system
+          dnf update -y
+
+          # Install Node.js 22
+          dnf install -y nodejs22 npm
+
+          # Install PM2 globally
+          npm install -g pm2
+
+          # Create bot user
+          useradd -m -s /bin/bash botuser
+
+          # Clone the repository
+          cd /home/botuser
+          sudo -u botuser git clone https://github.com/msu-denver/discord-email-verification.git
+          cd discord-email-verification
+          sudo -u botuser npm ci --production
+
+          # Fetch bot token from SSM Parameter Store
+          BOT_TOKEN=$(aws ssm get-parameter --name "/discord-bot/${EnvironmentName}/DISCORD_BOT_TOKEN" --query "Parameter.Value" --output text --region ${AWS::Region})
+
+          # Create .env file
+          sudo -u botuser cat > .env << 'ENVEOF'
+          DISCORD_BOT_TOKEN=${!BOT_TOKEN}
+          SERVER_ID=${ServerID}
+          QUARANTINE_ROLE_ID=${QuarantineRoleID}
+          VERIFIED_ROLE_ID=${VerifiedRoleID}
+          ADMIN_ROLE_ID=${AdminRoleID}
+          VERIFICATION_CHANNEL_ID=${VerificationChannelID}
+          WELCOME_CHANNEL_ID=${WelcomeChannelID}
+          SERVER_NAME=${ServerName}
+          SES_FROM_EMAIL=${SESFromEmail}
+          SES_FROM_NAME=${ServerName} Discord Verification
+          AWS_REGION=${AWS::Region}
+          USE_LOCAL_STORAGE=false
+          DYNAMODB_TABLE_NAME=discord-verification-${EnvironmentName}
+          ENVEOF
+
+          # Start the bot with PM2
+          sudo -u botuser pm2 start src/index.js --name discord-bot
+          sudo -u botuser pm2 save
+          sudo -u botuser pm2 startup systemd -u botuser --hp /home/botuser
+
+Outputs:
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref VerificationTable
+
+  InstanceId:
+    Description: EC2 instance ID
+    Value: !Ref BotInstance
+
+  InstancePublicIP:
+    Description: EC2 public IP (for SSH access)
+    Value: !GetAtt BotInstance.PublicIp
+
+  SESIdentity:
+    Description: SES email identity (check verification status in SES console)
+    Value: !Ref SESFromEmail
+
+  SSHCommand:
+    Description: SSH command to connect to the instance
+    Value: !Sub 'ssh -i ${KeyPairName}.pem ec2-user@${BotInstance.PublicIp}'
