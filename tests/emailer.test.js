@@ -10,6 +10,7 @@ vi.mock('../src/config', () => ({
   SES_FROM_NAME: 'Test Bot',
   SERVER_NAME: 'TestServer',
   AWS_REGION: 'us-east-1',
+  AWS_ENDPOINT_URL: '',
 }));
 
 // Capture what gets sent to SES
