@@ -92,20 +92,32 @@ Resources:
   # -------------------------------------------------------------------------
   # GitHub Actions Deploy Role
   #
-  # The role GitHub Actions assumes via OIDC. Three critical guards in the
+  # The role GitHub Actions assumes via OIDC. Four critical guards in the
   # trust policy:
   #
   #   1. Federated principal restricts to our specific OIDC provider —
   #      no other federated identity can assume this role.
   #   2. StringEquals on `aud` claim must be sts.amazonaws.com — prevents
   #      JWT misuse for non-AWS purposes.
-  #   3. StringLike on `sub` claim restricts to:
-  #      repo:msu-denver/discord-email-verification:ref:refs/heads/main
+  #   3. StringLike on `sub` claim restricts to a workflow run targeting
+  #      the production GitHub Environment. When a job specifies
+  #      `environment: production`, GitHub mints a token with
+  #      sub: repo:.../environment:production. PR runs, fork runs, and
+  #      jobs without environment: production get different sub values
+  #      and are denied.
+  #   4. StringEquals on the `ref` claim — independent of sub — requires
+  #      the workflow run to be on refs/heads/main. This is a separate
+  #      claim that GitHub always sets to the actual git ref. Even if
+  #      someone could somehow change the workflow to use a different
+  #      environment name, this would still block non-main runs.
   #
-  # The `sub` restriction is the most important. PRs (even from the same
-  # repo) get tokens with sub: repo:.../pull_request, which won't match.
-  # Tags get sub: repo:.../ref:refs/tags/<tag>. Forks get a different repo
-  # prefix entirely. None can assume this role.
+  # Combined with:
+  #   - the workflow's `if: github.ref == 'refs/heads/main' && github.event_name == 'push'` gate
+  #   - the GitHub production environment's "Deployment branches: main only"
+  #     restriction (configured in the repo settings UI)
+  #
+  # …we have four layers of defense before AWS will ever issue temporary
+  # credentials to a workflow run.
   #
   # Permissions granted:
   #   - ECR push to the bot's repo (and only that repo)
@@ -123,7 +135,8 @@ Resources:
     Properties:
       RoleName: !Sub '${AWS::StackName}-gha-deploy-role'
       Description: Assumed by GitHub Actions via OIDC to push images to ECR
-                   and trigger EC2 deploys. Restricted to main branch only.
+                   and trigger EC2 deploys. Restricted to main branch +
+                   production environment only.
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -134,8 +147,11 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # Independent ref check — the actual git ref claim must be
+                # refs/heads/main. Defends in depth alongside the sub check.
+                token.actions.githubusercontent.com:ref: refs/heads/main
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main'
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOrg}/${GitHubRepo}:environment:production'
       Policies:
         - PolicyName: EcrPush
           PolicyDocument:
