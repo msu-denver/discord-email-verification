@@ -1,0 +1,524 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  Discord email verification bot -- application stack.
+
+  Creates the runtime resources for the bot: DynamoDB table, EC2 IAM role,
+  security group, EC2 instance running the bot in a Docker container,
+  CloudWatch log group.
+
+  Imports from the bootstrap stack: ECR repository ARN/URI.
+
+  Depends on (manual prerequisites):
+    - The bootstrap stack (discord-bot-bootstrap) is already deployed.
+    - SSM parameters under /discord-bot/<EnvironmentName>/ are seeded.
+      (See scripts/aws/seed-ssm-parameters.sh)
+    - The VPC and key pair are already created (see Phase 4 manual steps).
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Environment
+        Parameters:
+          - EnvironmentName
+          - BootstrapStackName
+      - Label:
+          default: Compute & Network
+        Parameters:
+          - InstanceType
+          - VpcId
+          - SubnetId
+          - KeyPairName
+          - SshIngressCidr
+      - Label:
+          default: Container Image
+        Parameters:
+          - ImageTag
+      - Label:
+          default: SES
+        Parameters:
+          - SesFromEmail
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    Description: Environment name used in SSM parameter path
+                 (/discord-bot/<EnvironmentName>/) and resource names.
+
+  BootstrapStackName:
+    Type: String
+    Default: discord-bot-bootstrap
+    Description: Name of the bootstrap stack to import ECR ARN/URI from.
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: EC2 instance type. t3.micro is free-tier eligible.
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where the EC2 instance will live (c3-lab-vpc).
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet ID for the EC2 instance (e.g., c3-lab-public-1a).
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: discord-bot-keypair
+    Description: EC2 key pair for break-glass SSH (only relevant if
+                 SshIngressCidr is set).
+
+  SshIngressCidr:
+    Type: String
+    Default: ''
+    Description: |
+      CIDR allowed to SSH to the instance. Leave EMPTY to disable SSH
+      entirely (recommended -- use SSM Session Manager instead).
+    AllowedPattern: '^$|^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'
+
+  ImageTag:
+    Type: String
+    Default: latest
+    Description: ECR image tag to deploy on first boot. Use a main-<sha>
+                 tag for reproducible deployments.
+
+  SesFromEmail:
+    Type: String
+    Description: SES verified sender address. Used in the EC2 role's SES
+                 policy as a Condition on ses:FromAddress.
+
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Amazon Linux 2023 AMI (resolved from SSM Parameter Store
+                 -- always the latest; we don't pin in the template).
+
+Conditions:
+  HasSshIngress: !Not [!Equals [!Ref SshIngressCidr, '']]
+
+Resources:
+  # -------------------------------------------------------------------------
+  # CloudWatch Log Group for container logs
+  #
+  # The Docker awslogs driver writes container stdout/stderr here. Created
+  # before the EC2 instance because UserData uses it.
+  # -------------------------------------------------------------------------
+  ContainerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/ec2/discord-bot-${EnvironmentName}'
+      RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: c3-lab
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # -------------------------------------------------------------------------
+  # DynamoDB Table -- verification records
+  #
+  # Single-table design with PK/SK. PAY_PER_REQUEST is essentially free at
+  # our volume (less than 1M requests per month).
+  #
+  # Item types:
+  #   PK=CONFIG SK=DOMAINS              -> allowed email domains list
+  #   PK=CODE#<code> SK=USER#<userId>   -> pending verification (not currently used)
+  #   PK=USED#<email> SK=<timestamp>    -> completed verification (one per attempt)
+  # -------------------------------------------------------------------------
+  VerificationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'discord-verification-${EnvironmentName}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: c3-lab
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # -------------------------------------------------------------------------
+  # EC2 IAM Role -- the runtime identity for the bot
+  #
+  # Permissions are scoped tightly to specific resources. The role must
+  # be able to:
+  #   - Read SSM parameters under /discord-bot/<env>/* (and decrypt the
+  #     SecureString-typed bot token via KMS)
+  #   - Read/write the verification DynamoDB table (only this one)
+  #   - Send email via SES, but ONLY from the configured sender address
+  #   - Pull (read-only) from the bot's ECR repo (only this one)
+  #   - Write to its CloudWatch log group (only this one)
+  #   - Be managed by SSM Session Manager (for shell access without SSH)
+  #
+  # Permissions deliberately NOT granted:
+  #   - Any IAM action -- runtime should never modify roles/policies
+  #   - SSM PutParameter -- runtime cannot rotate its own secrets
+  #   - ECR push -- only the deploy role pushes; runtime is read-only
+  # -------------------------------------------------------------------------
+  Ec2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'discord-bot-${EnvironmentName}-ec2-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Grants the SSM agent on the instance permission to phone home
+        # for Session Manager / Run Command. Standard practice for any
+        # SSM-managed instance.
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ReadSsmParameters
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # GetParameter / GetParameters / GetParametersByPath all share
+              # the same IAM action: ssm:GetParameter / ssm:GetParameters /
+              # ssm:GetParametersByPath.
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource:
+                  # GetParametersByPath requires permission on the path
+                  # itself (no trailing /*). GetParameter / GetParameters
+                  # need /* to match individual child parameters.
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/discord-bot/${EnvironmentName}'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/discord-bot/${EnvironmentName}/*'
+              # SecureString parameters are encrypted by the AWS-managed
+              # alias/aws/ssm KMS key. To decrypt, we need kms:Decrypt
+              # against that key with a context constraint.
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+
+        - PolicyName: DynamoDbAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DescribeTable
+                Resource: !GetAtt VerificationTable.Arn
+
+        - PolicyName: SesSendEmail
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # SES doesn't support resource-level perms for SendEmail;
+              # we constrain via Condition on ses:FromAddress. This means
+              # even if the bot's code were exploited, an attacker could
+              # not send mail as any other identity in the account.
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    ses:FromAddress: !Ref SesFromEmail
+
+        - PolicyName: EcrPullReadOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # GetAuthorizationToken must be Resource: "*" -- it's
+              # account-scoped, not repo-scoped.
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource:
+                  Fn::ImportValue: !Sub '${BootstrapStackName}-EcrRepositoryArn'
+
+        - PolicyName: CloudWatchLogsWrite
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ContainerLogGroup}:*'
+      Tags:
+        - Key: Project
+          Value: c3-lab
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # -------------------------------------------------------------------------
+  # Instance Profile -- IAM's wrapper for attaching a role to EC2.
+  # -------------------------------------------------------------------------
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub 'discord-bot-${EnvironmentName}-instance-profile'
+      Roles:
+        - !Ref Ec2InstanceRole
+
+  # -------------------------------------------------------------------------
+  # Security Group
+  #
+  # Egress: 443 (HTTPS) only. That's all we need:
+  #   - Discord WebSocket (gateway.discord.gg)
+  #   - AWS APIs (DynamoDB, SES, SSM, ECR, CloudWatch)
+  #   - dnf package repos (use HTTPS)
+  #
+  # Ingress: nothing by default. SSM Session Manager works without inbound
+  # ports because the SSM agent on the instance opens the connection
+  # outbound. Optional SSH is gated by the HasSshIngress condition.
+  # -------------------------------------------------------------------------
+  Ec2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Discord verification bot -- egress 443 only, no inbound by default.
+      VpcId: !Ref VpcId
+      # Disable the default "allow all" egress and replace with HTTPS-only.
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS for Discord, AWS APIs, package repos
+      Tags:
+        - Key: Name
+          Value: !Sub 'discord-bot-${EnvironmentName}-sg'
+        - Key: Project
+          Value: c3-lab
+
+  # Optional SSH ingress -- only created if SshIngressCidr is non-empty.
+  Ec2SecurityGroupSshIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasSshIngress
+    Properties:
+      GroupId: !Ref Ec2SecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: !Ref SshIngressCidr
+      Description: SSH from break-glass CIDR
+
+  # -------------------------------------------------------------------------
+  # EC2 Instance
+  #
+  # Amazon Linux 2023 (AMI ID resolved from SSM at deploy time). The
+  # UserData script installs Docker, writes /usr/local/bin/deploy.sh, and
+  # invokes deploy.sh to perform the first deploy.
+  # -------------------------------------------------------------------------
+  Ec2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      IamInstanceProfile: !Ref Ec2InstanceProfile
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref Ec2SecurityGroup
+      Monitoring: false
+      MetadataOptions:
+        # IMDSv2 only -- protects against SSRF that exfiltrates instance
+        # role credentials. (IMDSv1 is the well-known Capital One breach
+        # vector.)
+        HttpTokens: required
+        HttpEndpoint: enabled
+        HttpPutResponseHopLimit: 2
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'discord-bot-${EnvironmentName}'
+        - Key: Project
+          Value: c3-lab
+        - Key: Environment
+          Value: !Ref EnvironmentName
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+            exec > >(tee -a /var/log/user-data.log) 2>&1
+
+            # ---------------------------------------------------------------
+            # Install Docker
+            # ---------------------------------------------------------------
+            dnf update -y
+            dnf install -y docker
+            systemctl enable --now docker
+
+            # ---------------------------------------------------------------
+            # Write the persistent deploy.sh -- invoked on first boot here,
+            # and on every subsequent deploy via SSM RunCommand from CI.
+            # ---------------------------------------------------------------
+            cat > /usr/local/bin/deploy.sh <<'DEPLOY_EOF'
+            ${DeployScriptBody}
+            DEPLOY_EOF
+            chmod 755 /usr/local/bin/deploy.sh
+
+            # ---------------------------------------------------------------
+            # Environment for deploy.sh -- write to /etc/discord-bot.envrc
+            # so SSM RunCommand picks them up too.
+            # ---------------------------------------------------------------
+            cat > /etc/discord-bot.envrc <<EOF_ENVRC
+            export AWS_REGION=${AwsRegion}
+            export ECR_REPOSITORY_URI=${EcrRepositoryUri}
+            export SSM_PARAMETER_PATH_PREFIX=/discord-bot/${EnvironmentName}
+            export CLOUDWATCH_LOG_GROUP=${ContainerLogGroupName}
+            export CONTAINER_NAME=discord-bot
+            EOF_ENVRC
+            chmod 644 /etc/discord-bot.envrc
+
+            # ---------------------------------------------------------------
+            # First deploy
+            # ---------------------------------------------------------------
+            set -a
+            . /etc/discord-bot.envrc
+            set +a
+            /usr/local/bin/deploy.sh ${ImageTag}
+
+          - AwsRegion: !Ref AWS::Region
+            EcrRepositoryUri:
+              Fn::ImportValue: !Sub '${BootstrapStackName}-EcrRepositoryUri'
+            ContainerLogGroupName: !Ref ContainerLogGroup
+            ImageTag: !Ref ImageTag
+            DeployScriptBody: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              IMAGE_TAG="${1:-latest}"
+
+              : "${AWS_REGION:?must be set}"
+              : "${ECR_REPOSITORY_URI:?must be set}"
+              : "${SSM_PARAMETER_PATH_PREFIX:?must be set}"
+              : "${CLOUDWATCH_LOG_GROUP:?must be set}"
+              : "${CONTAINER_NAME:?must be set}"
+
+              ENV_FILE=/etc/discord-bot.env
+
+              echo "==> Deploying image tag: $IMAGE_TAG"
+
+              # Fetch SSM parameters into env file (atomic replace)
+              TMP_ENV=$(mktemp)
+              trap 'rm -f "$TMP_ENV"' EXIT
+
+              aws ssm get-parameters-by-path \
+                --path "$SSM_PARAMETER_PATH_PREFIX" \
+                --recursive \
+                --with-decryption \
+                --region "$AWS_REGION" \
+                --query 'Parameters[].[Name,Value]' \
+                --output text \
+                | while IFS=$'\t' read -r name value; do
+                    key="${name##*/}"
+                    printf '%s=%s\n' "$key" "$value"
+                  done > "$TMP_ENV"
+
+              chmod 600 "$TMP_ENV"
+              chown root:root "$TMP_ENV"
+              mv "$TMP_ENV" "$ENV_FILE"
+              trap - EXIT
+
+              echo "    Wrote $(wc -l < "$ENV_FILE") parameters to $ENV_FILE"
+
+              # ECR login
+              ECR_REGISTRY="${ECR_REPOSITORY_URI%%/*}"
+              aws ecr get-login-password --region "$AWS_REGION" \
+                | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+              # Pull
+              docker pull "${ECR_REPOSITORY_URI}:${IMAGE_TAG}"
+
+              # Stop old, start new
+              if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+                docker stop "$CONTAINER_NAME" || true
+                docker rm "$CONTAINER_NAME" || true
+              fi
+
+              docker run -d \
+                --name "$CONTAINER_NAME" \
+                --restart unless-stopped \
+                --env-file "$ENV_FILE" \
+                --log-driver awslogs \
+                --log-opt "awslogs-region=$AWS_REGION" \
+                --log-opt "awslogs-group=$CLOUDWATCH_LOG_GROUP" \
+                --log-opt "awslogs-stream=$(hostname)" \
+                --log-opt "awslogs-create-group=false" \
+                --read-only \
+                --tmpfs /tmp:size=64M \
+                "${ECR_REPOSITORY_URI}:${IMAGE_TAG}"
+
+              echo "==> Deploy complete."
+              docker ps --filter "name=^${CONTAINER_NAME}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+
+Outputs:
+  Ec2InstanceId:
+    Description: EC2 instance ID. Add this as a GitHub repo variable named
+                 EC2_INSTANCE_ID for the Phase 9 deploy workflow.
+    Value: !Ref Ec2Instance
+    Export:
+      Name: !Sub '${AWS::StackName}-Ec2InstanceId'
+
+  Ec2InstancePublicIp:
+    Description: Public IP of the EC2 instance.
+    Value: !GetAtt Ec2Instance.PublicIp
+
+  Ec2InstanceRoleArn:
+    Description: ARN of the EC2 instance role (for adding SSM:SendCommand
+                 to the deploy role in Phase 9).
+    Value: !GetAtt Ec2InstanceRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-Ec2InstanceRoleArn'
+
+  DynamoDbTableName:
+    Description: DynamoDB table name.
+    Value: !Ref VerificationTable
+    Export:
+      Name: !Sub '${AWS::StackName}-DynamoDbTableName'
+
+  ContainerLogGroup:
+    Description: CloudWatch log group for container stdout/stderr.
+    Value: !Ref ContainerLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-ContainerLogGroup'
+
+  SsmStartSessionCommand:
+    Description: Command to open a shell on the instance via Session Manager.
+    Value: !Sub 'aws ssm start-session --target ${Ec2Instance} --profile cyberbridge --region ${AWS::Region}'
