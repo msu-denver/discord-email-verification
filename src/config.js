@@ -6,6 +6,7 @@
  *
  * Original author: Luke J Farchione | J4eva | 2/25/2025
  * Migrated to discord.js v14 + AWS SES + DynamoDB by MSU Denver CyberBridge
+ * Testing for CodeOwners
  * @license MIT
  */
 
