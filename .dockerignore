@@ -1,0 +1,43 @@
+# .dockerignore — excludes paths from Docker build context
+#
+# Even if our Dockerfile is careful about what it COPYs, this is a safety
+# net: if a future change adds `COPY . .`, these files still won't end
+# up in the image.
+
+# Secrets — must never be in an image
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Git history — would leak any secrets ever committed
+.git
+.gitignore
+.gitattributes
+
+# Tests, coverage, dev-only data
+tests/
+coverage/
+data/
+*.test.js
+
+# Node deps (rebuilt inside the image with `npm ci`)
+node_modules/
+
+# Local dev / OS / editor noise
+.DS_Store
+.vscode/
+.idea/
+*.log
+*.swp
+
+# CI / docs (not needed at runtime)
+.github/
+docs/
+*.md
+
+# Existing dev Dockerfile (we use Dockerfile.ecs for production builds)
+Dockerfile
+docker-compose.yml
+scripts/localstack/

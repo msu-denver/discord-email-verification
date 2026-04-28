@@ -1,3 +1,17 @@
+# CI workflow — runs tests on PRs and pushes; deploy job is gated to
+# main + push and uses OIDC (no long-lived AWS keys).
+#
+# Hardening:
+#   - Top-level `permissions: contents: read` — least-privilege GITHUB_TOKEN.
+#     Each job opts in to anything more.
+#   - Actions pinned to commit SHAs (not tags) to defend against compromised
+#     action releases. Comments next to each show the human-readable version.
+#   - `npm ci --ignore-scripts` in the install step — blocks malicious
+#     postinstall scripts.
+#   - `npm audit` runs as a warning but does not fail the build (yet).
+#   - Deploy job is gated to `github.ref == 'refs/heads/main' && github.event_name == 'push'`
+#     so it cannot run on a PR (and especially not a fork PR).
+
 name: CI
 
 on:
@@ -6,9 +20,18 @@ on:
   pull_request:
     branches: [main]
 
+# Default permissions for all jobs: read-only.
+# Jobs that need more (e.g., id-token: write for OIDC) opt in explicitly.
+permissions:
+  contents: read
+
 jobs:
+  # ------------------------------------------------------------------
+  # Test job — runs on every PR and every push to main.
+  # No AWS access, no secrets, no write permissions.
+  # ------------------------------------------------------------------
   test:
-    name: Test
+    name: Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
 
     strategy:
@@ -16,16 +39,20 @@ jobs:
         node-version: [18, 20, 22]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
+      # --ignore-scripts blocks malicious postinstall scripts in dependencies.
+      # CI is a high-value target for supply-chain attackers, so we don't
+      # let any package run arbitrary code during install.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Run tests
         run: npm test
@@ -34,21 +61,71 @@ jobs:
         if: matrix.node-version == 22
         run: npm run test:coverage
 
+      # Surface known CVEs in dependencies. Warn-only for now to avoid
+      # flakiness from transitive issues. Tighten to fail-on-high once
+      # we've established a baseline.
+      - name: Audit dependencies
+        if: matrix.node-version == 22
+        run: npm run audit
+        continue-on-error: true
+
+  # ------------------------------------------------------------------
+  # Lint / syntax check
+  # ------------------------------------------------------------------
   lint:
     name: Lint
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - name: Use Node.js 22
-        uses: actions/setup-node@v4
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Check for syntax errors
         run: node --check src/*.js src/commands/*.js
+
+  # ------------------------------------------------------------------
+  # Deploy job — currently a stub.
+  #
+  # Will be enabled once the bootstrap CloudFormation stack creates the
+  # OIDC provider + GhaDeployRole and we have an EC2 instance ID to
+  # target.
+  #
+  # Critical guards (already in place even though the job is disabled):
+  #   - `if: github.ref == 'refs/heads/main' && github.event_name == 'push'`
+  #     ensures it never runs on a PR (especially not a fork PR).
+  #   - `permissions: id-token: write, contents: read` — only what's
+  #     needed to mint an OIDC token and check out the repo.
+  #   - The AWS deploy role's trust policy will further restrict
+  #     `sub: repo:msu-denver/...:ref:refs/heads/main`, so even if this
+  #     job ran from a fork PR somehow, AWS would reject the assumeRole.
+  # ------------------------------------------------------------------
+  deploy:
+    name: Deploy to AWS
+    needs: [test, lint]
+    if: false  # TODO: change to `github.ref == 'refs/heads/main' && github.event_name == 'push'` when AWS infra is ready
+    runs-on: ubuntu-latest
+    environment: production
+
+    permissions:
+      id-token: write   # required to mint OIDC token
+      contents: read    # required for actions/checkout
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      # Placeholder steps. Real implementation lands in Phase 9:
+      #   - aws-actions/configure-aws-credentials with vars.AWS_DEPLOY_ROLE_ARN
+      #   - ./scripts/build/push-to-ecr.sh
+      #   - ./scripts/build/deploy-to-ec2.sh
+      - name: Deploy stub
+        run: echo "Deploy job is a stub. AWS infrastructure not yet provisioned."

@@ -3,6 +3,15 @@ node_modules/
 
 # Environment variables (contains secrets!)
 .env
+.env.*
+!.env.example
+
+# Private keys, certificates — must NEVER be committed
+# (Public repos are scanned for these by attacker bots within minutes.)
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Coverage reports
 coverage/
