@@ -1,0 +1,39 @@
+# Dependabot — automated dependency update PRs
+#
+# Catches known CVEs in dependencies and outdated GitHub Actions versions.
+# PRs still go through normal review (CODEOWNERS for package.json changes),
+# so we're notified about updates without auto-applying them.
+#
+# Reference: https://docs.github.com/code-security/dependabot
+
+version: 2
+updates:
+  # Node.js dependencies
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - npm
+    # Group minor + patch updates into a single PR per week to reduce PR noise.
+    # Major version bumps still get their own PR for careful review.
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions used in our workflows
+  # (These are a known attack vector — compromised actions can exfil secrets.)
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions

@@ -45,6 +45,15 @@ export async function handleVerifyCommand(interaction) {
     });
   }
 
+  // RFC 5321 caps email addresses at 254 chars. Reject before any expensive
+  // operation (storage lookup, log line, DynamoDB key construction).
+  if (email.length > 254) {
+    return interaction.reply({
+      content: 'That email address is too long to be valid. Please check and try again.',
+      ephemeral: true,
+    });
+  }
+
   // Domain check
   if (!storage.isAllowedDomain(email)) {
     const domainList = storage.getAllowedDomains().join(', ');

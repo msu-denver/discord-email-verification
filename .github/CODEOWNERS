@@ -1,0 +1,27 @@
+# CODEOWNERS — required reviewers for sensitive paths
+#
+# Combined with branch protection's "Require review from Code Owners" rule,
+# any PR touching these paths cannot merge without approval from the listed
+# owners. This is the primary guard against malicious PRs that try to
+# modify CI workflows, infrastructure, or build scripts.
+#
+# Format: <pattern>  <owner1> <owner2> ...
+# Patterns follow .gitignore syntax.
+
+# CI / GitHub Actions — exfil-attack target #1
+/.github/                  @daniel-pittman
+
+# AWS infrastructure as code
+/infrastructure/           @daniel-pittman
+
+# Build, deploy, and AWS automation scripts
+/scripts/                  @daniel-pittman
+
+# Container image definitions (build-time supply chain)
+/Dockerfile                @daniel-pittman
+/Dockerfile.ecs            @daniel-pittman
+/.dockerignore             @daniel-pittman
+
+# Dependency manifests (supply chain)
+/package.json              @daniel-pittman
+/package-lock.json         @daniel-pittman
