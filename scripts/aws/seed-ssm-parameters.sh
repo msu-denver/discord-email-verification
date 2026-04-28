@@ -78,6 +78,7 @@ KEYS_TO_SEED=(
   SERVER_NAME
   SES_FROM_EMAIL
   SES_FROM_NAME
+  DYNAMODB_TABLE_NAME
 )
 
 # Read a key's value from .env literally. Does NOT source the file (which
