@@ -1,0 +1,247 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  Bootstrap stack for the Discord email verification bot. Creates persistent
+  account-level resources that outlive any specific app deployment:
+
+    - GitHub OIDC identity provider (for GitHub Actions auth without long-lived keys)
+    - GhaDeployRole (the role GitHub Actions assumes via OIDC)
+    - ECR repository for the bot's Docker images
+
+  This stack is deployed once per AWS account and rarely changes. The app stack
+  (deployed separately) adds SSM SendCommand permissions to the deploy role
+  once the target EC2 instance exists.
+
+# ---------------------------------------------------------------------------
+# Console UI: group parameters logically and give them friendly labels.
+# Mirrors the pattern from sustainability-hub/scripts/aws/ecs-cluster.yml.
+# ---------------------------------------------------------------------------
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: GitHub Repository
+        Parameters:
+          - GitHubOrg
+          - GitHubRepo
+      - Label:
+          default: ECR Repository
+        Parameters:
+          - EcrRepositoryName
+          - ImageRetentionCount
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: msu-denver
+    Description: GitHub organization that owns the repo.
+
+  GitHubRepo:
+    Type: String
+    Default: discord-email-verification
+    Description: GitHub repository name. Used in the OIDC trust policy to
+                 restrict which repo can assume the deploy role.
+
+  EcrRepositoryName:
+    Type: String
+    Default: c3-lab/discord-email-verification
+    Description: ECR repository name (forward slashes are allowed and
+                 create namespacing in the registry).
+
+  ImageRetentionCount:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 100
+    Description: Number of main-tagged images to keep in ECR. Older images
+                 are deleted automatically by the lifecycle policy.
+
+Resources:
+  # -------------------------------------------------------------------------
+  # GitHub OIDC Identity Provider
+  #
+  # Establishes trust between AWS IAM and GitHub Actions. When a workflow
+  # runs, GitHub mints a short-lived JWT signed by its OIDC provider. AWS
+  # verifies that signature against this resource and lets the workflow
+  # assume specific roles WITHOUT any long-lived AWS access keys ever being
+  # stored in the repo.
+  #
+  # ThumbprintList: AWS validates the GitHub cert against these thumbprints.
+  # As of 2023, AWS handles thumbprint validation automatically for the
+  # token.actions.githubusercontent.com URL — but CloudFormation still
+  # requires the field, so we provide the documented values.
+  # -------------------------------------------------------------------------
+  GithubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        # Documented GitHub Actions OIDC thumbprints. AWS no longer requires
+        # these to match a specific cert (since 2023) but the field is still
+        # mandatory in CloudFormation.
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+      Tags:
+        - Key: Project
+          Value: c3-lab
+        - Key: ManagedBy
+          Value: cloudformation
+
+  # -------------------------------------------------------------------------
+  # GitHub Actions Deploy Role
+  #
+  # The role GitHub Actions assumes via OIDC. Three critical guards in the
+  # trust policy:
+  #
+  #   1. Federated principal restricts to our specific OIDC provider —
+  #      no other federated identity can assume this role.
+  #   2. StringEquals on `aud` claim must be sts.amazonaws.com — prevents
+  #      JWT misuse for non-AWS purposes.
+  #   3. StringLike on `sub` claim restricts to:
+  #      repo:msu-denver/discord-email-verification:ref:refs/heads/main
+  #
+  # The `sub` restriction is the most important. PRs (even from the same
+  # repo) get tokens with sub: repo:.../pull_request, which won't match.
+  # Tags get sub: repo:.../ref:refs/tags/<tag>. Forks get a different repo
+  # prefix entirely. None can assume this role.
+  #
+  # Permissions granted:
+  #   - ECR push to the bot's repo (and only that repo)
+  #
+  # Permissions deliberately NOT granted:
+  #   - ssm:GetParameter — deploy role can deploy code but cannot read
+  #     the bot token. Only the EC2 instance role (created in Phase 8)
+  #     can read SSM secrets.
+  #   - iam:* — no role/policy modifications.
+  #   - ssm:SendCommand — added by the app stack once the target instance
+  #     exists. Doing it here would require a wildcard or a placeholder.
+  # -------------------------------------------------------------------------
+  GhaDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-gha-deploy-role'
+      Description: Assumed by GitHub Actions via OIDC to push images to ECR
+                   and trigger EC2 deploys. Restricted to main branch only.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !GetAtt GithubOidcProvider.Arn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main'
+      Policies:
+        - PolicyName: EcrPush
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # GetAuthorizationToken is special — must be Resource: "*"
+              # because the token is account-wide, not repo-scoped.
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              # Push/pull permissions scoped to the bot's repo only.
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !GetAtt EcrRepository.Arn
+      Tags:
+        - Key: Project
+          Value: c3-lab
+        - Key: ManagedBy
+          Value: cloudformation
+
+  # -------------------------------------------------------------------------
+  # ECR Repository
+  #
+  # Where the bot's Docker images live. Configured with:
+  #   - ScanOnPush: true (free; catches known CVEs in dependencies and
+  #     base image layers on every push)
+  #   - Lifecycle policy:
+  #       - Expire untagged images after 1 day (cleanup of intermediate
+  #         build artifacts)
+  #       - Keep last 10 main-* tagged images (rollback ability without
+  #         unbounded storage cost)
+  #   - Tag mutability MUTABLE (so `latest` can be reassigned to point at
+  #     the newest main-<sha> image; we still get immutable tags via
+  #     main-<sha> for rollback target stability)
+  # -------------------------------------------------------------------------
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref EcrRepositoryName
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Expire untagged images after 1 day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 1
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep last ${ImageRetentionCount} main- images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["main-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": ${ImageRetentionCount}
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Project
+          Value: c3-lab
+        - Key: ManagedBy
+          Value: cloudformation
+
+Outputs:
+  GithubOidcProviderArn:
+    Description: ARN of the GitHub OIDC identity provider.
+    Value: !GetAtt GithubOidcProvider.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GithubOidcProviderArn'
+
+  GhaDeployRoleArn:
+    Description: ARN of the role GitHub Actions assumes via OIDC.
+                 Add this as a GitHub repository variable named AWS_DEPLOY_ROLE_ARN.
+    Value: !GetAtt GhaDeployRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GhaDeployRoleArn'
+
+  EcrRepositoryUri:
+    Description: ECR repository URI for `docker push`.
+                 Add this as a GitHub repository variable named ECR_REPOSITORY_URI.
+    Value: !GetAtt EcrRepository.RepositoryUri
+    Export:
+      Name: !Sub '${AWS::StackName}-EcrRepositoryUri'
+
+  EcrRepositoryArn:
+    Description: ECR repository ARN (used by app stack for read-only EC2 pulls).
+    Value: !GetAtt EcrRepository.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-EcrRepositoryArn'
