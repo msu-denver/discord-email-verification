@@ -93,25 +93,31 @@ jobs:
         run: node --check src/*.js src/commands/*.js
 
   # ------------------------------------------------------------------
-  # Deploy job — currently a stub.
+  # Build & push to ECR job
   #
-  # Will be enabled once the bootstrap CloudFormation stack creates the
-  # OIDC provider + GhaDeployRole and we have an EC2 instance ID to
-  # target.
+  # Runs only on push to main (after merge). Builds Dockerfile.ecs and
+  # pushes to ECR with two tags:
+  #   - main-<short-sha>  immutable rollback target
+  #   - latest            mutable, pulled by EC2 on deploy
   #
-  # Critical guards (already in place even though the job is disabled):
+  # Critical guards:
   #   - `if: github.ref == 'refs/heads/main' && github.event_name == 'push'`
-  #     ensures it never runs on a PR (especially not a fork PR).
+  #     ensures this never runs on a PR (especially not a fork PR).
   #   - `permissions: id-token: write, contents: read` — only what's
   #     needed to mint an OIDC token and check out the repo.
-  #   - The AWS deploy role's trust policy will further restrict
+  #   - The AWS deploy role's trust policy further restricts
   #     `sub: repo:msu-denver/...:ref:refs/heads/main`, so even if this
   #     job ran from a fork PR somehow, AWS would reject the assumeRole.
+  #   - No `secrets.*` references — we use only repo variables (vars.*),
+  #     which are non-sensitive ARNs.
+  #
+  # SSM RunCommand (to actually deploy onto an EC2 instance) lands in
+  # Phase 9, after the EC2 instance exists.
   # ------------------------------------------------------------------
-  deploy:
-    name: Deploy to AWS
+  push-to-ecr:
+    name: Build and push to ECR
     needs: [test, lint]
-    if: false  # TODO: change to `github.ref == 'refs/heads/main' && github.event_name == 'push'` when AWS infra is ready
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: production
 
@@ -123,9 +129,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      # Placeholder steps. Real implementation lands in Phase 9:
-      #   - aws-actions/configure-aws-credentials with vars.AWS_DEPLOY_ROLE_ARN
-      #   - ./scripts/build/push-to-ecr.sh
-      #   - ./scripts/build/deploy-to-ec2.sh
-      - name: Deploy stub
-        run: echo "Deploy job is a stub. AWS infrastructure not yet provisioned."
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37  # v6.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+
+      - name: Login to ECR
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
+        run: ./scripts/build/aws-cli-login.sh
+
+      - name: Build and push to ECR
+        env:
+          ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
+          GIT_SHA: ${{ github.sha }}
+        run: ./scripts/build/push-to-ecr.sh
