@@ -5,7 +5,8 @@
 # short-lived token from `aws ecr get-login-password`.
 #
 # Works in two contexts:
-#   1. Locally — uses AWS_PROFILE (default: cyberbridge) for credentials.
+#   1. Locally — set AWS_PROFILE to your credentials profile (or rely on the
+#      default profile / credentials chain).
 #   2. In GitHub Actions — uses the credentials previously set by
 #      aws-actions/configure-aws-credentials (OIDC flow).
 #

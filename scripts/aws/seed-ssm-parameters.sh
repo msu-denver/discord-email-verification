@@ -24,7 +24,7 @@
 # Run from the repo root (so .env is found).
 #
 # Env overrides:
-#   AWS_PROFILE - default: cyberbridge
+#   AWS_PROFILE - if unset, the AWS CLI's default profile is used
 #   AWS_REGION  - default: us-east-1
 
 set -euo pipefail
@@ -33,7 +33,10 @@ ENV_NAME="${1:-}"
 OVERWRITE_FLAG=""
 [[ "${2:-}" == "--overwrite" ]] && OVERWRITE_FLAG="--overwrite"
 
-PROFILE="${AWS_PROFILE:-cyberbridge}"
+# Pass --profile only if AWS_PROFILE is set; otherwise let the AWS CLI fall
+# back to its default profile (or the credentials chain).
+PROFILE_ARGS=()
+[[ -n "${AWS_PROFILE:-}" ]] && PROFILE_ARGS=(--profile "$AWS_PROFILE")
 REGION="${AWS_REGION:-us-east-1}"
 
 if [[ -z "$ENV_NAME" ]]; then
@@ -53,7 +56,7 @@ Examples:
   $0 production --overwrite
 
 Env overrides:
-  AWS_PROFILE (default: cyberbridge)
+  AWS_PROFILE (if unset, the AWS CLI's default profile is used)
   AWS_REGION  (default: us-east-1)
 USAGE
   exit 1
@@ -99,7 +102,7 @@ ssm_type_for_key() {
 
 echo "Seeding SSM parameters for environment: $ENV_NAME"
 echo "Path prefix: /discord-bot/$ENV_NAME/"
-echo "Profile:     $PROFILE"
+echo "Profile:     ${AWS_PROFILE:-<default>}"
 echo "Region:      $REGION"
 [[ -n "$OVERWRITE_FLAG" ]] && echo "Mode:        --overwrite (existing values will be replaced)"
 echo ""
@@ -125,7 +128,7 @@ for key in "${KEYS_TO_SEED[@]}"; do
        --type "$param_type" \
        --value "$value" \
        $OVERWRITE_FLAG \
-       --profile "$PROFILE" \
+       "${PROFILE_ARGS[@]}" \
        --region "$REGION" \
        --output text >/dev/null 2>&1; then
     echo "  OK    $key  ($param_type)"
@@ -141,7 +144,11 @@ echo "Seeded: $seeded   Skipped: $skipped   Failed: $failed"
 echo ""
 echo "Verify with:"
 echo "  aws ssm get-parameters-by-path --path '/discord-bot/$ENV_NAME/' \\"
-echo "    --recursive --query 'Parameters[].Name' --profile $PROFILE --region $REGION"
+if [[ -n "${AWS_PROFILE:-}" ]]; then
+  echo "    --recursive --query 'Parameters[].Name' --profile $AWS_PROFILE --region $REGION"
+else
+  echo "    --recursive --query 'Parameters[].Name' --region $REGION"
+fi
 
 if [[ "$failed" -gt 0 ]]; then
   exit 1

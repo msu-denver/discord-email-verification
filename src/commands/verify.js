@@ -45,11 +45,13 @@ export async function handleVerifyCommand(interaction) {
     });
   }
 
-  // RFC 5321 caps email addresses at 254 chars. Reject before any expensive
-  // operation (storage lookup, log line, DynamoDB key construction).
-  if (email.length > 254) {
+  // RFC 5321 caps email addresses at 254 chars total and the local-part
+  // (before @) at 64 chars. Reject before any expensive operation (storage
+  // lookup, log line, DynamoDB key construction).
+  const atIdx = email.indexOf('@');
+  if (email.length > 254 || atIdx < 1 || atIdx > 64) {
     return interaction.reply({
-      content: 'That email address is too long to be valid. Please check and try again.',
+      content: 'That email address is not in a valid format. Please check and try again.',
       ephemeral: true,
     });
   }
@@ -111,7 +113,9 @@ export async function handleVerifyCommand(interaction) {
     });
   }
 
-  pendingVerifications.delete(interaction.user.id);
+  // Keep the throttle entry on SES failure so a user can't burn quota by
+  // re-calling /verify in a tight loop. They'll be locked out for 5 min,
+  // matching the success-path throttle.
   return interaction.reply({
     content: 'There was an error sending the verification email. Please try again later or contact a server admin.',
     ephemeral: true,
@@ -142,6 +146,18 @@ export async function handleVerifyCodeCommand(interaction) {
     });
   }
 
+  const submittedCode = interaction.options.getString('code')?.toUpperCase();
+
+  // Reject obviously-malformed input before counting it as an attempt.
+  // The code we generate is always 8 hex chars; junk would never match
+  // anyway, and shouldn't burn one of the 3 real attempts.
+  if (!submittedCode || submittedCode.length > 100) {
+    return interaction.reply({
+      content: 'That code is not in a valid format. Please check the email and try again.',
+      ephemeral: true,
+    });
+  }
+
   // Too many attempts?
   data.attempts += 1;
   if (data.attempts > 3) {
@@ -152,7 +168,6 @@ export async function handleVerifyCodeCommand(interaction) {
     });
   }
 
-  const submittedCode = interaction.options.getString('code')?.toUpperCase();
   if (submittedCode !== data.code) {
     const attemptsLeft = 3 - data.attempts;
     return interaction.reply({

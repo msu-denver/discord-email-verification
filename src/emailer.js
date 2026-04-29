@@ -12,6 +12,19 @@
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { SES_FROM_EMAIL, SES_FROM_NAME, SERVER_NAME, AWS_REGION, AWS_ENDPOINT_URL } from './config.js';
 
+// Defense-in-depth: HTML-escape any value before interpolating it into the
+// email body. Today both `code` (hex from crypto.randomBytes) and SERVER_NAME
+// (from config) are app-controlled, so this is precautionary — but it means
+// a future change can't accidentally turn either into an injection vector.
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Create SES client — when AWS_ENDPOINT_URL is set (e.g. LocalStack), route there instead of real AWS
 const sesClientConfig = { region: AWS_REGION };
 if (AWS_ENDPOINT_URL) {
@@ -40,19 +53,21 @@ export async function sendVerificationEmail(email, code) {
     "If you didn't request this code, please ignore this email.",
   ].join('\n');
 
+  const safeServer = escapeHtml(SERVER_NAME);
+  const safeCode = escapeHtml(code);
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #00447c;">${SERVER_NAME} Discord Verification</h2>
-      <p>Hi there! Thanks for joining our ${SERVER_NAME} Discord community!</p>
+      <h2 style="color: #00447c;">${safeServer} Discord Verification</h2>
+      <p>Hi there! Thanks for joining our ${safeServer} Discord community!</p>
       <p>Your verification code is:</p>
       <div style="font-size: 24px; font-weight: bold; background-color: #f5f5f5; padding: 10px; margin: 15px 0; border-radius: 4px; text-align: center;">
-        ${code}
+        ${safeCode}
       </div>
       <p>This code will expire in 30 minutes.</p>
       <p>Simply return to Discord and use the <strong>/verifycode</strong> command with this code to get full access to the server.</p>
       <p>If you didn't request this code, please ignore this email.</p>
       <p style="color: #777; font-size: 12px; margin-top: 20px;">
-        This is an automated message from ${SERVER_NAME}.
+        This is an automated message from ${safeServer}.
         Please check your spam folder if you don't see this email in your inbox.
       </p>
     </div>

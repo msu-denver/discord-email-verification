@@ -73,4 +73,15 @@ describe('sendVerificationEmail', () => {
     const result = await sendVerificationEmail('student@test.edu', 'FAIL0000');
     expect(result).toBe(false);
   });
+
+  it('HTML-escapes the verification code in the HTML body', async () => {
+    mockSend.mockResolvedValueOnce({});
+    // A code with <script>-like chars shouldn't ever occur (we generate hex),
+    // but the escape layer is defense-in-depth for future-proofing.
+    await sendVerificationEmail('student@test.edu', '<script>x</script>');
+
+    const html = mockSend.mock.calls[0][0].Message.Body.Html.Data;
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
 });
