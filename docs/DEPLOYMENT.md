@@ -4,6 +4,19 @@ Operational procedures for the Discord email verification bot.
 
 For the security model behind these procedures, see [SECURITY.md](./SECURITY.md).
 
+## Prerequisites for the commands in this doc
+
+Most commands in this doc assume two environment variables are set:
+
+```bash
+export AWS_PROFILE=<your-aws-profile-name>
+export AWS_REGION=us-east-1
+```
+
+`AWS_PROFILE` should match a profile in your `~/.aws/credentials` (or `~/.aws/config`) that has admin or sufficiently broad access to the AWS account hosting the bot. If you use the AWS CLI's default profile or environment-based credentials, you can omit `AWS_PROFILE`.
+
+If you prefer, you can pass `--profile <name>` explicitly to each `aws` command instead of using the env var.
+
 ## Architecture at a glance
 
 ```
@@ -59,10 +72,10 @@ That's it. No manual steps.
 
 # 3. Trigger a redeploy so the running container picks up the new env
 aws ssm send-command \
-  --instance-ids "$(aws cloudformation describe-stacks --stack-name discord-bot-production --query 'Stacks[0].Outputs[?OutputKey==`Ec2InstanceId`].OutputValue' --output text --profile cyberbridge --region us-east-1)" \
+  --instance-ids "$(aws cloudformation describe-stacks --stack-name discord-bot-production --query 'Stacks[0].Outputs[?OutputKey==`Ec2InstanceId`].OutputValue' --output text --region "$AWS_REGION")" \
   --document-name AWS-RunShellScript \
   --parameters 'commands=["set -a && . /etc/discord-bot.envrc && set +a && /usr/local/bin/deploy.sh latest 2>&1"]' \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 ```
 
 If the change affects something the IAM policy enforces (e.g., `SES_FROM_EMAIL`), you also need to update the CloudFormation stack so the policy condition matches:
@@ -73,7 +86,7 @@ aws cloudformation deploy \
   --template-file infrastructure/app.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides SesFromEmail=<new-value> \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 ```
 
 ---
@@ -92,15 +105,19 @@ aws ecr describe-images \
   --repository-name c3-lab/discord-email-verification \
   --query 'sort_by(imageDetails,&imagePushedAt)[-5:].[imageTags,imagePushedAt]' \
   --output table \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 
 # Pick a known-good main-<sha> tag and redeploy
 PREVIOUS_TAG=main-abc1234
+INSTANCE_ID=$(aws cloudformation describe-stacks \
+  --stack-name discord-bot-production \
+  --query 'Stacks[0].Outputs[?OutputKey==`Ec2InstanceId`].OutputValue' \
+  --output text --region "$AWS_REGION")
 aws ssm send-command \
-  --instance-ids i-094605d3c85f46c39 \
+  --instance-ids "$INSTANCE_ID" \
   --document-name AWS-RunShellScript \
   --parameters "commands=['set -a && . /etc/discord-bot.envrc && set +a && /usr/local/bin/deploy.sh $PREVIOUS_TAG 2>&1']" \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 ```
 
 The previous image stays in ECR for at least 10 main-tagged versions thanks to the lifecycle policy.
@@ -125,9 +142,9 @@ The "soft" path is faster (no new build) but leaves the bad code in `main`.
 INSTANCE_ID=$(aws cloudformation describe-stacks \
   --stack-name discord-bot-production \
   --query 'Stacks[0].Outputs[?OutputKey==`Ec2InstanceId`].OutputValue' \
-  --output text --profile cyberbridge --region us-east-1)
+  --output text --region "$AWS_REGION")
 
-aws ssm start-session --target $INSTANCE_ID --profile cyberbridge --region us-east-1
+aws ssm start-session --target $INSTANCE_ID --region "$AWS_REGION"
 ```
 
 This drops you into a shell on the instance as `ssm-user` (sudo available). Session is logged to CloudWatch Logs by AWS for audit.
@@ -140,10 +157,10 @@ If SSM agent is broken (extreme situation), you can temporarily allow SSH by set
 
 ```bash
 # Tail container logs
-aws logs tail /aws/ec2/discord-bot-production --follow --profile cyberbridge --region us-east-1
+aws logs tail /aws/ec2/discord-bot-production --follow --region "$AWS_REGION"
 
 # Last hour of bot activity
-aws logs tail /aws/ec2/discord-bot-production --since 1h --profile cyberbridge --region us-east-1
+aws logs tail /aws/ec2/discord-bot-production --since 1h --region "$AWS_REGION"
 
 # UserData / cloud-init log (only on first boot)
 # SSM into the instance, then:
@@ -173,7 +190,7 @@ aws cloudformation deploy \
   --stack-name discord-bot-bootstrap \
   --template-file infrastructure/bootstrap.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 ```
 Capture stack outputs and add to GitHub repository variables: `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION`, `ECR_REPOSITORY_URI`.
 
@@ -195,7 +212,7 @@ aws cloudformation deploy \
     VpcId=vpc-XXXX SubnetId=subnet-XXXX \
     KeyPairName=discord-bot-keypair \
     SesFromEmail=verify@bot.c3-lab.org \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 ```
 Capture the EC2 instance ID and add to GitHub repo variables as `EC2_INSTANCE_ID`.
 
@@ -216,7 +233,7 @@ aws cloudformation deploy \
   --template-file infrastructure/app.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides ... \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 ```
 
 For changes that would replace resources (rare for us), CloudFormation creates new ones first and deletes old ones, so the bot stays up.
@@ -241,7 +258,7 @@ For changes that update in place (most common — IAM policy edits, security gro
 | ECR storage | <$0.10 |
 | **Total** | **~$10-11/mo** |
 
-Budget alert is set at $50/mo with 80%/100%/100%-forecasted notifications going to `cs-department-aws@msudenver.onmicrosoft.com` and `dpittma8@msudenver.edu`.
+Recommended: set a $50/mo AWS Budget with notifications at 80% actual, 100% actual, and 100% forecasted, sent to a monitored billing distribution group and the lab admin contact.
 
 ---
 
@@ -274,28 +291,33 @@ Budget alert is set at $50/mo with 80%/100%/100%-forecasted notifications going 
 ```bash
 # Get all stack outputs
 aws cloudformation describe-stacks --stack-name discord-bot-production \
-  --query 'Stacks[0].Outputs' --output table --profile cyberbridge --region us-east-1
+  --query 'Stacks[0].Outputs' --output table --region "$AWS_REGION"
+
+# Resolve the instance ID once at the top of your shell session
+INSTANCE_ID=$(aws cloudformation describe-stacks \
+  --stack-name discord-bot-production \
+  --query 'Stacks[0].Outputs[?OutputKey==`Ec2InstanceId`].OutputValue' \
+  --output text --region "$AWS_REGION")
 
 # What's currently running on the instance?
-INSTANCE_ID=i-094605d3c85f46c39
 aws ssm send-command --instance-ids $INSTANCE_ID \
   --document-name AWS-RunShellScript \
   --parameters 'commands=["docker ps","docker inspect discord-bot --format {{.Config.Image}}"]' \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 
 # Clear out a stuck container
 aws ssm send-command --instance-ids $INSTANCE_ID \
   --document-name AWS-RunShellScript \
   --parameters 'commands=["docker rm -f discord-bot"]' \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 
 # Restart bot without changing image
 aws ssm send-command --instance-ids $INSTANCE_ID \
   --document-name AWS-RunShellScript \
   --parameters 'commands=["set -a && . /etc/discord-bot.envrc && set +a && /usr/local/bin/deploy.sh latest 2>&1"]' \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 
 # What's in DynamoDB?
 aws dynamodb scan --table-name discord-verification-production \
-  --profile cyberbridge --region us-east-1
+  --region "$AWS_REGION"
 ```

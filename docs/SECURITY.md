@@ -216,7 +216,7 @@ Six layers must all break before AWS issues credentials.
 
 ### Suspected bot token leak
 1. **Immediately rotate in Discord** — Developer Portal → Bot → Reset Token
-2. Update SSM: `aws ssm put-parameter --name /discord-bot/production/DISCORD_BOT_TOKEN --type SecureString --value <new> --overwrite --profile cyberbridge`
+2. Update SSM: `aws ssm put-parameter --name /discord-bot/production/DISCORD_BOT_TOKEN --type SecureString --value <new> --overwrite`
 3. SSM Run Command to redeploy: `./scripts/build/deploy-to-ec2.sh` from local
 4. The old token is dead the moment Discord rotates it; no AWS-side action needed
 
@@ -227,7 +227,7 @@ There are no long-lived AWS credentials. If an OIDC token is somehow stolen mid-
 3. Rotate any role policies as needed, then detach the deny
 
 ### EC2 instance compromise
-1. Stop the instance: `aws ec2 stop-instances --instance-ids i-XXXX --profile cyberbridge`
+1. Stop the instance: `aws ec2 stop-instances --instance-ids i-XXXX`
 2. Snapshot for forensics: `aws ec2 create-snapshot --volume-id <vol> --description "Compromise IR <date>"`
 3. Terminate and redeploy: `aws cloudformation update-stack` with new `ImageTag` to force fresh container
 4. Review CloudWatch logs for IoCs
