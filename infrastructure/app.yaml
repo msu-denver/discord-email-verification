@@ -488,6 +488,48 @@ Resources:
               echo "==> Deploy complete."
               docker ps --filter "name=^${CONTAINER_NAME}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 
+  # -------------------------------------------------------------------------
+  # Deploy permission for GitHub Actions
+  #
+  # The bootstrap stack's GhaDeployRole has ECR push permission only.
+  # Here we attach an inline policy that grants ssm:SendCommand to the
+  # specific EC2 instance and document we use, scoped tightly:
+  #
+  #   - Resource: this instance ARN only (cannot send commands to other
+  #     instances even if they exist in the account)
+  #   - Resource: AWS-RunShellScript document only (cannot run arbitrary
+  #     SSM documents)
+  #   - GetCommandInvocation needed to poll completion status
+  #
+  # This is in app.yaml (not bootstrap.yaml) because the instance ID is
+  # only known once the EC2 instance is created. If we destroy and rebuild
+  # the app stack, this attachment goes with it.
+  # -------------------------------------------------------------------------
+  GhaDeployRoleSsmPermission:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      PolicyName: !Sub 'discord-bot-${EnvironmentName}-ssm-deploy'
+      RoleName:
+        Fn::ImportValue: !Sub '${BootstrapStackName}-GhaDeployRoleName'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Send the deploy command to ONLY our EC2 instance, using ONLY
+          # the AWS-RunShellScript document. Cannot fan out to other hosts
+          # or run other SSM documents.
+          - Effect: Allow
+            Action: ssm:SendCommand
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Ec2Instance}'
+              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript'
+          # Poll command status. This is account-wide because GetCommandInvocation
+          # uses CommandId, not the instance ARN. We accept this because
+          # CommandIds are random UUIDs and only the role that issued the
+          # SendCommand can correlate them.
+          - Effect: Allow
+            Action: ssm:GetCommandInvocation
+            Resource: '*'
+
 Outputs:
   Ec2InstanceId:
     Description: EC2 instance ID. Add this as a GitHub repo variable named
