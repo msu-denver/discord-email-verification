@@ -16,9 +16,17 @@ vi.mock('../src/config', () => ({
 // Capture what gets sent to SES
 const mockSend = vi.fn();
 
+// Vitest 4 requires `function` or `class` syntax for mocks used as constructors.
+// Arrow functions can't be used with `new`, so we use class declarations here.
 vi.mock('@aws-sdk/client-ses', () => ({
-  SESClient: vi.fn().mockImplementation(() => ({ send: mockSend })),
-  SendEmailCommand: vi.fn().mockImplementation((params) => params),
+  SESClient: vi.fn().mockImplementation(class {
+    send = mockSend;
+  }),
+  SendEmailCommand: vi.fn().mockImplementation(class {
+    constructor(params) {
+      Object.assign(this, params);
+    }
+  }),
 }));
 
 const { sendVerificationEmail } = await import('../src/emailer.js');

@@ -1,7 +1,7 @@
 # Discord Email Verification Bot
 
 [![CI](https://github.com/msu-denver/discord-email-verification/actions/workflows/ci.yml/badge.svg)](https://github.com/msu-denver/discord-email-verification/actions/workflows/ci.yml)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
 [![discord.js](https://img.shields.io/badge/discord.js-v14-5865F2)](https://discord.js.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -32,7 +32,7 @@ A Discord bot that verifies members using their educational email addresses. Bui
 
 ## Prerequisites
 
-- **Node.js** 18+ (22 recommended)
+- **Node.js** 20+ (22 recommended)
 - **Docker** (for local email testing with LocalStack)
 - **AWS Account** with SES and DynamoDB access (production only)
 - **Discord Bot Application** created in the [Developer Portal](https://discord.com/developers/applications)
