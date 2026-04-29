@@ -24,10 +24,10 @@
   "author": "MSU Denver CyberBridge",
   "license": "MIT",
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.0.0",
-    "@aws-sdk/client-ses": "^3.0.0",
-    "@aws-sdk/lib-dynamodb": "^3.0.0",
-    "discord.js": "^14.0.0",
+    "@aws-sdk/client-dynamodb": "^3.1038.0",
+    "@aws-sdk/client-ses": "^3.1038.0",
+    "@aws-sdk/lib-dynamodb": "^3.1038.0",
+    "discord.js": "^14.26.3",
     "dotenv": "^16.0.0"
   },
   "devDependencies": {
