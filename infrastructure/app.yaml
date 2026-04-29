@@ -563,4 +563,6 @@ Outputs:
 
   SsmStartSessionCommand:
     Description: Command to open a shell on the instance via Session Manager.
-    Value: !Sub 'aws ssm start-session --target ${Ec2Instance} --profile cyberbridge --region ${AWS::Region}'
+                 Set AWS_PROFILE / AWS_REGION env vars before running, or add
+                 --profile and --region flags to match your local AWS config.
+    Value: !Sub 'aws ssm start-session --target ${Ec2Instance}'

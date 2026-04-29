@@ -139,14 +139,41 @@ describe('handleVerifyCommand', () => {
     );
   });
 
-  it('cleans up if email send fails', async () => {
+  it('rejects email with local-part longer than 64 chars', async () => {
+    const interaction = createMockInteraction();
+    const longLocal = 'a'.repeat(65) + '@test.edu';
+    interaction.options.getString.mockReturnValue(longLocal);
+
+    await handleVerifyCommand(interaction);
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('not in a valid format') })
+    );
+    // Should be rejected before any storage/SES work happens.
+    expect(mockStorage.getEmailVerificationCount).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it('rejects email with no local-part (starts with @)', async () => {
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('@test.edu');
+
+    await handleVerifyCommand(interaction);
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('not in a valid format') })
+    );
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it('keeps throttle entry if email send fails so the user cannot retry immediately', async () => {
     mockSendEmail.mockResolvedValue(false);
     const interaction = createMockInteraction();
     interaction.options.getString.mockReturnValue('user@test.edu');
 
     await handleVerifyCommand(interaction);
 
-    expect(pendingVerifications.has('user-1')).toBe(false);
+    // Entry must survive an SES failure — otherwise a user could spam /verify
+    // by picking an address that always errors and bypass the 5-min throttle.
+    expect(pendingVerifications.has('user-1')).toBe(true);
     expect(interaction.reply).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining('error sending') })
     );
@@ -216,6 +243,26 @@ describe('handleVerifyCodeCommand', () => {
       expect.objectContaining({ content: expect.stringContaining('too many') })
     );
     expect(pendingVerifications.has('user-1')).toBe(false);
+  });
+
+  it('rejects malformed code without burning an attempt', async () => {
+    pendingVerifications.set('user-1', {
+      email: 'user@test.edu',
+      code: 'RIGHT123',
+      timestamp: Date.now(),
+      attempts: 0,
+    });
+
+    const interaction = createMockInteraction();
+    // 200-char "code" — way past anything we'd ever generate.
+    interaction.options.getString.mockReturnValue('A'.repeat(200));
+
+    await handleVerifyCodeCommand(interaction);
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('not in a valid format') })
+    );
+    // Junk submissions must NOT count toward the 3-attempt cap.
+    expect(pendingVerifications.get('user-1').attempts).toBe(0);
   });
 
   it('verifies user on correct code', async () => {
