@@ -93,29 +93,29 @@ jobs:
         run: node --check src/*.js src/commands/*.js
 
   # ------------------------------------------------------------------
-  # Build & push to ECR job
+  # Deploy job
   #
-  # Runs only on push to main (after merge). Builds Dockerfile.ecs and
-  # pushes to ECR with two tags:
-  #   - main-<short-sha>  immutable rollback target
-  #   - latest            mutable, pulled by EC2 on deploy
+  # Runs only on push to main (after merge). Three sequential steps:
+  #   1. Build Dockerfile.ecs and push to ECR with main-<sha> + latest tags
+  #   2. SSM Run Command on the EC2 instance to pull the new image and
+  #      restart the container
   #
-  # Critical guards:
-  #   - `if: github.ref == 'refs/heads/main' && github.event_name == 'push'`
-  #     ensures this never runs on a PR (especially not a fork PR).
-  #   - `permissions: id-token: write, contents: read` — only what's
-  #     needed to mint an OIDC token and check out the repo.
-  #   - The AWS deploy role's trust policy further restricts
-  #     `sub: repo:msu-denver/...:ref:refs/heads/main`, so even if this
-  #     job ran from a fork PR somehow, AWS would reject the assumeRole.
-  #   - No `secrets.*` references — we use only repo variables (vars.*),
-  #     which are non-sensitive ARNs.
+  # Critical guards (any one failure blocks the deploy):
+  #   - Workflow `if: github.ref == 'refs/heads/main' && github.event_name == 'push'`
+  #     gate (never runs on a PR or fork PR)
+  #   - GitHub production environment: deployment branches restricted to main
+  #   - AWS trust policy: `sub` claim must be `repo:.../environment:production`
+  #   - AWS trust policy: `ref` claim must be `refs/heads/main`
+  #   - `permissions: id-token: write, contents: read` — minimal token scope
+  #   - No `secrets.*` references — only `vars.*` (non-sensitive ARNs)
   #
-  # SSM RunCommand (to actually deploy onto an EC2 instance) lands in
-  # Phase 9, after the EC2 instance exists.
+  # The deploy role has tightly scoped permissions: ECR push to the bot
+  # repo only; ssm:SendCommand to ONE specific instance and ONE specific
+  # SSM document; NO ssm:GetParameter (cannot read bot token even if
+  # CI is compromised).
   # ------------------------------------------------------------------
-  push-to-ecr:
-    name: Build and push to ECR
+  deploy:
+    name: Deploy to AWS
     needs: [test, lint]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -149,3 +149,15 @@ jobs:
           ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
           GIT_SHA: ${{ github.sha }}
         run: ./scripts/build/push-to-ecr.sh
+
+      - name: Deploy to EC2 via SSM
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+          IMAGE_TAG: main-${{ github.sha }}
+        run: |
+          # Use the short SHA tag so the on-instance pull matches the
+          # immutable tag we just pushed (rather than `latest`, which
+          # is mutable and might briefly point to a different image).
+          export IMAGE_TAG="main-$(echo "${{ github.sha }}" | cut -c1-7)"
+          ./scripts/build/deploy-to-ec2.sh

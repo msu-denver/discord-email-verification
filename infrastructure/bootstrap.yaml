@@ -249,6 +249,13 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-GhaDeployRoleArn'
 
+  GhaDeployRoleName:
+    Description: Name of the role GitHub Actions assumes via OIDC.
+                 Used by the app stack to attach an SSM SendCommand policy.
+    Value: !Ref GhaDeployRole
+    Export:
+      Name: !Sub '${AWS::StackName}-GhaDeployRoleName'
+
   EcrRepositoryUri:
     Description: ECR repository URI for `docker push`.
                  Add this as a GitHub repository variable named ECR_REPOSITORY_URI.
