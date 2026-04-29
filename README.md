@@ -7,6 +7,8 @@
 
 A Discord bot that verifies members using their educational email addresses. Built for the MSU Denver Computer Science Department Discord server.
 
+**Operational docs:** [SECURITY.md](./docs/SECURITY.md) (threat model + audit checklist) · [DEPLOYMENT.md](./docs/DEPLOYMENT.md) (runbook).
+
 ## How It Works
 
 1. A new member joins the Discord server and is automatically assigned a **quarantine role** (limited access)
