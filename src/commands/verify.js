@@ -15,7 +15,7 @@ import {
   SERVER_NAME,
 } from '../config.js';
 import storage from '../storage.js';
-import { formatTimeLeft, generateVerificationCode } from '../utils.js';
+import { formatTimeLeft, generateVerificationCode, isValidEmail } from '../utils.js';
 import { sendVerificationEmail } from '../emailer.js';
 
 // In-memory store for pending verifications.
@@ -47,9 +47,15 @@ export async function handleVerifyCommand(interaction) {
 
   // RFC 5321 caps email addresses at 254 chars total and the local-part
   // (before @) at 64 chars. Reject before any expensive operation (storage
-  // lookup, log line, DynamoDB key construction).
+  // lookup, log line, DynamoDB key construction). The format check via
+  // isValidEmail catches the rest (bad TLD shape, hyphen-edged labels, etc.).
   const atIdx = email.indexOf('@');
-  if (email.length > 254 || atIdx < 1 || atIdx > 64) {
+  if (
+    email.length > 254 ||
+    atIdx < 1 ||
+    atIdx > 64 ||
+    !isValidEmail(email)
+  ) {
     return interaction.reply({
       content: 'That email address is not in a valid format. Please check and try again.',
       ephemeral: true,

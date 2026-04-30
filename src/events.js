@@ -14,6 +14,12 @@ import {
 } from './config.js';
 import { handleVerifyCommand, handleVerifyCodeCommand } from './commands/verify.js';
 import { handleAdminCommand } from './commands/admin.js';
+import { writeHeartbeat } from './utils.js';
+
+// 30-second cadence; the Dockerfile HEALTHCHECK requires the file to be
+// modified within the last 90 seconds (so a single missed tick is OK,
+// but a real disconnect surfaces in ~3 minutes via 3 retries).
+const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 
 /**
  * Set up all Discord event handlers on the client.
@@ -41,6 +47,15 @@ export default function setupEventHandlers(client) {
     } catch (error) {
       console.error('[ready] Error fetching commands:', error);
     }
+
+    // Start the heartbeat so the Docker HEALTHCHECK can detect a silent
+    // gateway disconnect. Touch immediately, then on every interval — but
+    // only while the WebSocket is actually ready. If discord.js drops and
+    // tries to reconnect, isReady() returns false and the file goes stale.
+    writeHeartbeat();
+    setInterval(() => {
+      if (client.isReady()) writeHeartbeat();
+    }, HEARTBEAT_INTERVAL_MS);
   });
 
   // New member join — assign quarantine role and send welcome prompt
