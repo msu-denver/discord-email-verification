@@ -164,6 +164,17 @@ describe('handleVerifyCommand', () => {
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
+  it('rejects email with malformed domain (consecutive dots)', async () => {
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('user@bad..edu');
+
+    await handleVerifyCommand(interaction);
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('not in a valid format') })
+    );
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
   it('keeps throttle entry if email send fails so the user cannot retry immediately', async () => {
     mockSendEmail.mockResolvedValue(false);
     const interaction = createMockInteraction();

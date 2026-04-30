@@ -2,7 +2,10 @@
  * Tests for src/utils.js
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 // Mock config before importing utils
 vi.mock('../src/config', () => ({
@@ -10,7 +13,7 @@ vi.mock('../src/config', () => ({
 }));
 
 // Use dynamic import so the mock is in place first
-const { formatTimeLeft, generateVerificationCode, hasAdminRole, isValidEmail } =
+const { formatTimeLeft, generateVerificationCode, hasAdminRole, isValidEmail, writeHeartbeat } =
   await import('../src/utils.js');
 
 // ---------- formatTimeLeft ----------
@@ -83,6 +86,14 @@ describe('isValidEmail', () => {
     expect(isValidEmail('first.last@my-university.edu')).toBe(true);
   });
 
+  it('accepts plus-tag addresses', () => {
+    expect(isValidEmail('student+club@msudenver.edu')).toBe(true);
+  });
+
+  it('accepts multi-label TLDs', () => {
+    expect(isValidEmail('user@dept.example.co.uk')).toBe(true);
+  });
+
   it('rejects missing @', () => {
     expect(isValidEmail('studentmsudenver.edu')).toBe(false);
   });
@@ -101,5 +112,81 @@ describe('isValidEmail', () => {
 
   it('rejects empty string', () => {
     expect(isValidEmail('')).toBe(false);
+  });
+
+  it('rejects trailing dot in domain', () => {
+    expect(isValidEmail('student@msudenver.edu.')).toBe(false);
+  });
+
+  it('rejects consecutive dots in local part', () => {
+    expect(isValidEmail('first..last@msudenver.edu')).toBe(false);
+  });
+
+  it('rejects leading dot in local part', () => {
+    expect(isValidEmail('.student@msudenver.edu')).toBe(false);
+  });
+
+  it('rejects domain label starting with hyphen', () => {
+    expect(isValidEmail('user@-bad.edu')).toBe(false);
+  });
+
+  it('rejects domain label ending with hyphen', () => {
+    expect(isValidEmail('user@bad-.edu')).toBe(false);
+  });
+
+  it('rejects non-string input', () => {
+    expect(isValidEmail(null)).toBe(false);
+    expect(isValidEmail(undefined)).toBe(false);
+    expect(isValidEmail(42)).toBe(false);
+  });
+});
+
+// ---------- writeHeartbeat ----------
+
+describe('writeHeartbeat', () => {
+  let tmpFile;
+
+  beforeEach(() => {
+    tmpFile = path.join(os.tmpdir(), `heartbeat-test-${process.pid}-${Date.now()}`);
+  });
+
+  afterEach(() => {
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {
+      // file may not exist if a test asserted it wasn't written
+    }
+  });
+
+  it('writes a numeric timestamp to the heartbeat file', () => {
+    const before = Date.now();
+    writeHeartbeat(tmpFile);
+    const after = Date.now();
+
+    const contents = fs.readFileSync(tmpFile, 'utf-8');
+    const written = Number(contents);
+    expect(Number.isFinite(written)).toBe(true);
+    expect(written).toBeGreaterThanOrEqual(before);
+    expect(written).toBeLessThanOrEqual(after);
+  });
+
+  it('overwrites the file on each call', () => {
+    writeHeartbeat(tmpFile);
+    const first = fs.readFileSync(tmpFile, 'utf-8');
+    // Sleep a tick so timestamps differ.
+    const t = Date.now();
+    while (Date.now() === t) { /* spin */ }
+    writeHeartbeat(tmpFile);
+    const second = fs.readFileSync(tmpFile, 'utf-8');
+    expect(second).not.toBe(first);
+  });
+
+  it('does not throw when the path is unwritable', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // /proc on Linux is read-only; on macOS the path just doesn't exist —
+    // either way writeFileSync rejects, and we must swallow the error.
+    expect(() => writeHeartbeat('/this/path/definitely/does/not/exist')).not.toThrow();
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });
