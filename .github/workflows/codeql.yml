@@ -1,0 +1,58 @@
+# CodeQL static analysis for the bot's JavaScript source.
+#
+# Runs on every PR (catches issues before they hit main), every push to
+# main (so the security tab tracks main's current state), and weekly on
+# a schedule (re-checks already-merged code against newly-added CodeQL
+# rules — when the GitHub team ships a new query, we want it run against
+# our existing code without waiting for a PR to trigger it).
+#
+# Findings appear in the repo's Security tab. We don't gate merges on
+# CodeQL status checks (yet) — the goal is visibility before enforcement.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, Wednesdays at 14:23 UTC. Off-peak for ubuntu-latest runners.
+    - cron: '23 14 * * 3'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      # Required to upload findings to the Security tab.
+      security-events: write
+      # CodeQL needs to read package metadata for some queries.
+      packages: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@b2f9ef845756500b97acbdaf5c1dd4e9c1d15734  # v3.35.2
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended adds queries that flag higher-severity bugs
+          # at the cost of slightly more false positives.
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@b2f9ef845756500b97acbdaf5c1dd4e9c1d15734  # v3.35.2
+        with:
+          category: '/language:${{ matrix.language }}'

@@ -1,9 +1,14 @@
 # Discord Email Verification Bot
 
 [![CI](https://github.com/msu-denver/discord-email-verification/actions/workflows/ci.yml/badge.svg)](https://github.com/msu-denver/discord-email-verification/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/msu-denver/discord-email-verification/actions/workflows/codeql.yml/badge.svg)](https://github.com/msu-denver/discord-email-verification/actions/workflows/codeql.yml)
+[![Tests](https://img.shields.io/badge/tests-78%20passing-brightgreen)](./tests)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
 [![discord.js](https://img.shields.io/badge/discord.js-v14-5865F2)](https://discord.js.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Vitest](https://img.shields.io/badge/tested%20with-vitest%204-6e9f18)](https://vitest.dev/)
+[![Deployed](https://img.shields.io/badge/deployed-AWS%20EC2%20%2B%20DynamoDB%20%2B%20SES-orange)](./docs/DEPLOYMENT.md)
+[![Security](https://img.shields.io/badge/security-OIDC%20%7C%20least--privilege%20IAM%20%7C%20SSM%20Parameter%20Store-blue)](./docs/SECURITY.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 A Discord bot that verifies members using their educational email addresses. Built for the MSU Denver Computer Science Department Discord server.
 
@@ -209,6 +214,10 @@ npm run test:coverage # Coverage report (target: 80%+)
 - Email domain whitelist enforcement
 - Admin role required for management commands
 
+## Contributing
+
+We welcome contributions. Start with [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md) for the development setup and PR flow, and our [Code of Conduct](./.github/CODE_OF_CONDUCT.md). For vulnerability reports, see [`.github/SECURITY.md`](./.github/SECURITY.md) — please do not open public issues for security bugs.
+
 ## Credits
 
 - **Original bot**: Luke J Farchione (2025)
@@ -216,4 +225,4 @@ npm run test:coverage # Coverage report (target: 80%+)
 
 ## License
 
-MIT
+[MIT](./LICENSE), with dual copyright (Luke J Farchione 2025 + Metropolitan State University of Denver 2026).
