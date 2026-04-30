@@ -61,13 +61,40 @@ jobs:
         if: matrix.node-version == 22
         run: npm run test:coverage
 
-      # Surface known CVEs in dependencies. Warn-only for now to avoid
-      # flakiness from transitive issues. Tighten to fail-on-high once
-      # we've established a baseline.
+      # Surface known CVEs in production dependencies. The script uses
+      # --omit=dev --audit-level=high so a single transitive moderate
+      # issue won't block CI — only high or critical CVEs in deps that
+      # ship to production. We've established a clean baseline (0 vulns
+      # as of vitest 4 / dotenv 17 / SDK upgrades) so this can fail builds.
       - name: Audit dependencies
         if: matrix.node-version == 22
         run: npm run audit
-        continue-on-error: true
+
+  # ------------------------------------------------------------------
+  # Dependency review — fails the build if a PR introduces dependencies
+  # with known high/critical CVEs or with non-allowlisted licenses. This
+  # complements `npm audit` (which is post-hoc) by surfacing supply-chain
+  # issues at the moment they're being introduced. PR-only by design;
+  # the action requires the base/head ref pair.
+  # ------------------------------------------------------------------
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48  # v4.9.0
+        with:
+          fail-on-severity: high
+          # Permissive license allowlist suitable for a public MIT project.
+          # ISC/BSD/Apache/MIT family + the unlicensed/CC0 variants OSS Node
+          # packages commonly use. Anything outside this list flags review.
+          allow-licenses: 0BSD, BSD-2-Clause, BSD-3-Clause, ISC, MIT, Apache-2.0, CC0-1.0, Unlicense, BlueOak-1.0.0
+          comment-summary-in-pr: on-failure
 
   # ------------------------------------------------------------------
   # Lint / syntax check
