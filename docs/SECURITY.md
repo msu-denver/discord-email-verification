@@ -139,6 +139,19 @@ What the bot uses at runtime.
 | Code expiration | 30 minutes |
 | Admin commands gated by Discord role | `ADMIN_ROLE_ID` check on every admin subcommand |
 
+### Layer 9: Deliverability monitoring
+
+| Control | Implementation |
+|---|---|
+| SES configuration set on every send | `ConfigurationSetName` attached when `SES_CONFIGURATION_SET` env var is set (production only) |
+| Bounce event routing | configuration set publishes `bounce` + `reject` events to a dedicated SNS topic |
+| Complaint event routing | separate SNS topic for `complaint` events (distinct urgency) |
+| Operational notification | both topics email a single ops address (`SesBounceNotificationEmail` CFN parameter); requires manual confirmation post-deploy |
+| SES sender domain authenticated | DKIM (verified), SPF (`include:amazonses.com`), DMARC (`p=none` reporting); cuts spam-folder rate |
+| No auto-suppression | SES account-level suppression is left off so the bot's allowlist remains the single source of truth |
+
+See `docs/DEPLOYMENT.md` for the routine that exercises the pipeline with the SES mailbox simulator addresses.
+
 ---
 
 ## Audit checklist

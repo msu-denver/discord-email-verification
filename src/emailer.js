@@ -10,7 +10,7 @@
  */
 
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
-import { SES_FROM_EMAIL, SES_FROM_NAME, SERVER_NAME, AWS_REGION, AWS_ENDPOINT_URL } from './config.js';
+import { SES_FROM_EMAIL, SES_FROM_NAME, SES_CONFIGURATION_SET, SERVER_NAME, AWS_REGION, AWS_ENDPOINT_URL } from './config.js';
 
 // Defense-in-depth: HTML-escape any value before interpolating it into the
 // email body. Today both `code` (hex from crypto.randomBytes) and SERVER_NAME
@@ -86,6 +86,13 @@ export async function sendVerificationEmail(email, code) {
       },
     },
   };
+
+  // Only attach ConfigurationSetName when SES_CONFIGURATION_SET is set.
+  // Local dev / LocalStack leaves it empty, since LocalStack doesn't
+  // implement configuration sets and would reject the call.
+  if (SES_CONFIGURATION_SET) {
+    params.ConfigurationSetName = SES_CONFIGURATION_SET;
+  }
 
   try {
     await sesClient.send(new SendEmailCommand(params));
