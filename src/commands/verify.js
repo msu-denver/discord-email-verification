@@ -6,6 +6,7 @@
  * @license MIT
  */
 
+import { MessageFlags } from 'discord.js';
 import {
   QUARANTINE_ROLE_ID,
   VERIFIED_ROLE_ID,
@@ -33,7 +34,7 @@ export async function handleVerifyCommand(interaction) {
   if (!member.roles.cache.has(QUARANTINE_ROLE_ID)) {
     return interaction.reply({
       content: "You're already verified! Enjoy the server!",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -41,7 +42,7 @@ export async function handleVerifyCommand(interaction) {
   if (!email) {
     return interaction.reply({
       content: 'Please provide a valid email address.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -58,7 +59,7 @@ export async function handleVerifyCommand(interaction) {
   ) {
     return interaction.reply({
       content: 'That email address is not in a valid format. Please check and try again.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -67,7 +68,7 @@ export async function handleVerifyCommand(interaction) {
     const domainList = storage.getAllowedDomains().join(', ');
     return interaction.reply({
       content: `Sorry, we only accept email addresses from these domains: ${domainList}. Please use your educational email address.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -78,7 +79,7 @@ export async function handleVerifyCommand(interaction) {
       content:
         `This email has reached the maximum of ${MAX_VERIFICATIONS_PER_EMAIL} verifications.\n\n` +
         '**Need help?** Please contact a server admin. They can use `/admin resetemail` to allow your email to be used again.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -91,7 +92,7 @@ export async function handleVerifyCommand(interaction) {
       const timeLeft = formatTimeLeft(5 * 60 * 1000 - elapsed);
       return interaction.reply({
         content: `You recently requested a verification code. Please wait ${timeLeft} before requesting a new one.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -115,7 +116,7 @@ export async function handleVerifyCommand(interaction) {
         `Please check your inbox (and spam/junk folders) for an email from ${SERVER_NAME} Discord Verification.\n\n` +
         'Once you have the code, use the `/verifycode` command to complete your verification.\n\n' +
         'Example: `/verifycode code:ABC123`',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -124,7 +125,7 @@ export async function handleVerifyCommand(interaction) {
   // matching the success-path throttle.
   return interaction.reply({
     content: 'There was an error sending the verification email. Please try again later or contact a server admin.',
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -139,7 +140,7 @@ export async function handleVerifyCodeCommand(interaction) {
   if (!data) {
     return interaction.reply({
       content: "I don't see any pending verification for you. Please use the `/verify` command first to request a verification code.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -148,7 +149,7 @@ export async function handleVerifyCodeCommand(interaction) {
     pendingVerifications.delete(userId);
     return interaction.reply({
       content: 'Your verification code has expired. Please use the `/verify` command again to request a new code.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -160,7 +161,7 @@ export async function handleVerifyCodeCommand(interaction) {
   if (!submittedCode || submittedCode.length > 100) {
     return interaction.reply({
       content: 'That code is not in a valid format. Please check the email and try again.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -170,7 +171,7 @@ export async function handleVerifyCodeCommand(interaction) {
     pendingVerifications.delete(userId);
     return interaction.reply({
       content: "You've made too many incorrect attempts. Please use the `/verify` command again to request a new code.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -180,7 +181,7 @@ export async function handleVerifyCodeCommand(interaction) {
       content:
         `That code doesn't match what we sent you. You have ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} left.\n\n` +
         'Please double-check and try again, or use `/verify` to request a new code.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -214,13 +215,13 @@ export async function handleVerifyCodeCommand(interaction) {
 
     return interaction.reply({
       content: `**Verification successful!** Welcome to the ${SERVER_NAME} Discord community! You now have full access to the server.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     console.error('[verifycode] Error verifying user:', error);
     return interaction.reply({
       content: 'There was an error completing your verification. Please contact a server admin.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }

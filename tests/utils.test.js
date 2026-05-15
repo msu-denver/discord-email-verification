@@ -184,9 +184,32 @@ describe('writeHeartbeat', () => {
   it('does not throw when the path is unwritable', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     // /proc on Linux is read-only; on macOS the path just doesn't exist —
-    // either way writeFileSync rejects, and we must swallow the error.
+    // either way the open call rejects, and we must swallow the error.
     expect(() => writeHeartbeat('/this/path/definitely/does/not/exist')).not.toThrow();
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+
+  it('refuses to follow a symlink (O_NOFOLLOW)', () => {
+    // If the heartbeat path resolves to a symlink, the write must fail
+    // (without crashing) rather than clobber whatever the symlink targets.
+    // Defends against the symlink-attack variant of predictable-temp-file.
+    const target = path.join(os.tmpdir(), `heartbeat-target-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(target, 'should-not-be-overwritten');
+    try {
+      fs.symlinkSync(target, tmpFile);
+    } catch (err) {
+      // Some platforms (e.g. Windows CI without privilege) can't create
+      // symlinks. Skip the assertion there rather than failing the suite.
+      if (err.code === 'EPERM') return;
+      throw err;
+    }
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    writeHeartbeat(tmpFile);
+    expect(errorSpy).toHaveBeenCalled();
+    expect(fs.readFileSync(target, 'utf-8')).toBe('should-not-be-overwritten');
+    errorSpy.mockRestore();
+    fs.unlinkSync(target);
   });
 });
