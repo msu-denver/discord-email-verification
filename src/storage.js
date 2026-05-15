@@ -286,10 +286,15 @@ export class LocalStorage {
     ensureDirectoryExists(this.codesDir);
     ensureDirectoryExists(this.usedCodesDir);
 
-    if (fs.existsSync(this.domainsPath)) {
+    // Read-or-create-empty without a TOCTOU window. The previous
+    // existsSync→readFileSync pattern let an attacker (theoretical here,
+    // since this backend is dev-only) swap the file between check and
+    // read. Catch ENOENT instead — atomic w.r.t. the filesystem.
+    try {
       const raw = fs.readFileSync(this.domainsPath, 'utf-8');
       this.allowedDomains = JSON.parse(raw);
-    } else {
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
       this.allowedDomains = [];
       fs.writeFileSync(this.domainsPath, JSON.stringify([], null, 2));
     }

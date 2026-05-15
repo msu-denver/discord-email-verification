@@ -6,6 +6,7 @@
  * @license MIT
  */
 
+import { MessageFlags } from 'discord.js';
 import {
   VERIFICATION_CHANNEL_ID,
   QUARANTINE_ROLE_ID,
@@ -101,7 +102,7 @@ export default function setupEventHandlers(client) {
         default:
           await interaction.reply({
             content: `Unknown command: ${commandName}`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
       }
     } catch (error) {
@@ -110,7 +111,7 @@ export default function setupEventHandlers(client) {
       if (!interaction.replied && !interaction.deferred) {
         await interaction.reply({
           content: 'An error occurred while processing your command. Please try again later or contact a server admin.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } else if (interaction.deferred && !interaction.replied) {
         await interaction.editReply({

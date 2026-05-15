@@ -6,6 +6,7 @@
  * @license MIT
  */
 
+import { MessageFlags } from 'discord.js';
 import { hasAdminRole } from '../utils.js';
 import storage from '../storage.js';
 import { MAX_VERIFICATIONS_PER_EMAIL } from '../config.js';
@@ -18,7 +19,7 @@ export async function handleAdminCommand(interaction) {
   if (!hasAdminRole(interaction.member)) {
     return interaction.reply({
       content: 'Sorry, only server administrators can use these commands.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -40,7 +41,7 @@ export async function handleAdminCommand(interaction) {
     default:
       return interaction.reply({
         content: `Unknown subcommand: ${subcommand}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
   }
 }
@@ -66,7 +67,7 @@ async function handleStorageInfo(interaction) {
     message += `- Used Codes: \`${info.localUsedCodesDir}\`\n`;
   }
 
-  return interaction.reply({ content: message, ephemeral: true });
+  return interaction.reply({ content: message, flags: MessageFlags.Ephemeral });
 }
 
 /**
@@ -76,14 +77,14 @@ async function handleStorageInfo(interaction) {
 async function handleDomainAdd(interaction) {
   const domain = interaction.options.getString('domain')?.toLowerCase().trim();
   if (!domain) {
-    return interaction.reply({ content: 'Please provide a valid domain name (e.g., msudenver.edu).', ephemeral: true });
+    return interaction.reply({ content: 'Please provide a valid domain name (e.g., msudenver.edu).', flags: MessageFlags.Ephemeral });
   }
 
   if (!domain.includes('.') || domain.startsWith('.') || domain.endsWith('.')) {
-    return interaction.reply({ content: 'Invalid domain format. Please provide a valid domain like "msudenver.edu".', ephemeral: true });
+    return interaction.reply({ content: 'Invalid domain format. Please provide a valid domain like "msudenver.edu".', flags: MessageFlags.Ephemeral });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const allowedDomains = storage.getAllowedDomains();
   if (allowedDomains.includes(domain)) {
@@ -106,10 +107,10 @@ async function handleDomainAdd(interaction) {
 async function handleDomainRemove(interaction) {
   const domain = interaction.options.getString('domain')?.toLowerCase().trim();
   if (!domain) {
-    return interaction.reply({ content: 'Please provide a domain to remove.', ephemeral: true });
+    return interaction.reply({ content: 'Please provide a domain to remove.', flags: MessageFlags.Ephemeral });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const allowedDomains = storage.getAllowedDomains();
   if (!allowedDomains.includes(domain)) {
@@ -134,7 +135,7 @@ async function handleDomainRemove(interaction) {
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  */
 async function handleDomainList(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const allowedDomains = storage.getAllowedDomains();
   if (allowedDomains.length === 0) {
@@ -152,10 +153,10 @@ async function handleDomainList(interaction) {
 async function handleCheckEmail(interaction) {
   const email = interaction.options.getString('email')?.toLowerCase().trim();
   if (!email) {
-    return interaction.reply({ content: 'Please provide an email address to check.', ephemeral: true });
+    return interaction.reply({ content: 'Please provide an email address to check.', flags: MessageFlags.Ephemeral });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const verifiedCount = await storage.getEmailVerificationCount(email);
 
@@ -183,10 +184,10 @@ async function handleCheckEmail(interaction) {
 async function handleResetEmail(interaction) {
   const email = interaction.options.getString('email')?.toLowerCase().trim();
   if (!email) {
-    return interaction.reply({ content: 'Please provide an email address to reset.', ephemeral: true });
+    return interaction.reply({ content: 'Please provide an email address to reset.', flags: MessageFlags.Ephemeral });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const result = await storage.resetEmail(email);
 
   if (result.success) {

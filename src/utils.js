@@ -91,12 +91,28 @@ export const BOT_HEARTBEAT_FILE = '/tmp/discord-bot-heartbeat';
  * interval tick will retry, and the healthcheck will catch a sustained
  * outage on its own.
  *
+ * Opens with O_NOFOLLOW + mode 0600 to defend against the symlink-attack
+ * variant of the predictable-temp-file class. This is defense-in-depth:
+ * the container's /tmp is a private tmpfs with no other writers, so the
+ * attack vector is not present in our deployment — but we do this anyway
+ * so the code is robust for any fork running in a less-isolated context.
+ *
  * @param {string} [filePath=BOT_HEARTBEAT_FILE] override for testing
  */
 export function writeHeartbeat(filePath = BOT_HEARTBEAT_FILE) {
+  let fd;
   try {
-    fs.writeFileSync(filePath, String(Date.now()));
+    fd = fs.openSync(
+      filePath,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW,
+      0o600,
+    );
+    fs.writeSync(fd, String(Date.now()));
   } catch (error) {
     console.error('[writeHeartbeat] Failed to write heartbeat:', error.message);
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* ignore */ }
+    }
   }
 }
