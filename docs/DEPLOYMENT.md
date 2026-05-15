@@ -171,6 +171,47 @@ The container's stdout/stderr go to CloudWatch via the `awslogs` Docker driver. 
 
 ---
 
+## Routine: monitoring SES bounces and complaints
+
+The bot publishes bounce / complaint / reject events to two SNS topics via an SES configuration set. The topics are subscribed to a single ops email defined at stack deploy time (`SesBounceNotificationEmail` parameter).
+
+**Where the events come from:**
+- **Bounces** -- recipient mailbox unreachable (typo, retired address, full mailbox). Hard bounces also degrade the domain's sending reputation if they accumulate.
+- **Complaints** -- recipient marked the message as spam in their mail client. Far more serious than a bounce; high complaint rates trigger SES throttling or sandbox demotion.
+- **Rejects** -- SES itself refused to send (most commonly because the recipient is on the account-level suppression list).
+
+**Verifying the pipeline is wired correctly:**
+
+SES provides simulator addresses that deterministically produce events. None of these count toward real sending reputation, but they exercise the SNS pipeline end to end:
+
+```text
+bounce@simulator.amazonses.com      -> hard bounce event
+complaint@simulator.amazonses.com   -> complaint event
+success@simulator.amazonses.com     -> delivered (no event published, we don't subscribe to "delivery")
+```
+
+To test:
+
+1. `/admin domain-add simulator.amazonses.com` on the Discord server (temporary -- remove after testing).
+2. From a quarantined account, `/verify email:bounce@simulator.amazonses.com`. Expect an SES bounce notification in the ops inbox within a minute or two.
+3. Same with `complaint@simulator.amazonses.com`.
+4. `/admin domain-remove simulator.amazonses.com`.
+
+**Responding to a real bounce/complaint:**
+- For a bounce, check whether the address is a typo. If so, no action -- the user can retry with the correct address.
+- For a complaint, take it seriously. Add the address to a denylist (currently manual; see `/admin` commands) and investigate whether the verification flow is unclear enough to be perceived as spam.
+
+**Statistics:**
+```bash
+# 14-day rolling stats per metric
+aws ses get-send-statistics --region "$AWS_REGION"
+
+# Current 24h send / bounce / complaint
+aws sesv2 get-account --region "$AWS_REGION" --query 'SendQuota'
+```
+
+---
+
 ## First-time deployment from scratch
 
 If the AWS account is empty (e.g., setting up a fresh staging environment), here's the order of operations.
@@ -212,9 +253,10 @@ aws cloudformation deploy \
     VpcId=vpc-XXXX SubnetId=subnet-XXXX \
     KeyPairName=discord-bot-keypair \
     SesFromEmail=verify@bot.c3-lab.org \
+    SesBounceNotificationEmail=<your-ops-email> \
   --region "$AWS_REGION"
 ```
-Capture the EC2 instance ID and add to GitHub repo variables as `EC2_INSTANCE_ID`.
+Capture the EC2 instance ID and add to GitHub repo variables as `EC2_INSTANCE_ID`. The stack also creates an SES configuration set and two SNS topics; AWS will email two subscription confirmation links to `SesBounceNotificationEmail` -- click both before assuming the pipeline works. After confirming, set `SES_CONFIGURATION_SET` in your local `.env` to the stack output `SesConfigurationSetName` (typically `discord-bot-production`) and run `./scripts/aws/seed-ssm-parameters.sh production --overwrite`.
 
 ### 7. Verify
 - Bot shows online in Discord.

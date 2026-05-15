@@ -90,6 +90,16 @@ Parameters:
     Description: SES verified sender address. Used in the EC2 role's SES
                  policy as a Condition on ses:FromAddress.
 
+  SesBounceNotificationEmail:
+    Type: String
+    Description: Email address subscribed to the SES bounce + complaint
+                 SNS topics. Required for SES production-access review;
+                 you must click the confirmation link AWS sends after
+                 stack create/update for each subscription. Pass via
+                 --parameter-overrides at deploy time; not in the
+                 committed template.
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+
   AmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
@@ -150,6 +160,141 @@ Resources:
           Value: c3-lab
         - Key: Environment
           Value: !Ref EnvironmentName
+
+  # -------------------------------------------------------------------------
+  # SES bounce / complaint pipeline
+  #
+  # AWS expects production-access SES tenants to actively monitor bounces
+  # and complaints; absence of a pipeline is a denial reason on its own.
+  # We route both event types from SES via a configuration set into two
+  # SNS topics, each subscribed to a single operations email.
+  #
+  # Why two topics instead of one fan-out:
+  #   - Different operational urgency (a bounce is a delivery failure;
+  #     a complaint is a recipient flagging the message as spam --
+  #     much more serious).
+  #   - Lets future subscribers route them separately (e.g. Slack for
+  #     complaints, email for bounces) without rewiring SES.
+  #
+  # Why bounce + complaint + reject and NOT delivery / send:
+  #   - bounce / complaint / reject are the actionable events.
+  #   - delivery / send fire on every successful message and would
+  #     drown the inbox at any real volume.
+  #
+  # Why no auto-suppression:
+  #   - SES can auto-add bounced/complained addresses to an account-level
+  #     suppression list. For an educational verification bot a single
+  #     bounce may just be a typo; we prefer human review on the first
+  #     occurrence over silent SES-side suppression of future sends.
+  # -------------------------------------------------------------------------
+  SesConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name: !Sub 'discord-bot-${EnvironmentName}'
+
+  SesBouncesTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'discord-bot-${EnvironmentName}-ses-bounces'
+      DisplayName: 'SES Bounces (discord-bot)'
+      Tags:
+        - Key: Project
+          Value: c3-lab
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  SesBouncesTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref SesBouncesTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # SES needs explicit Allow to publish to the topic. The
+          # SourceAccount condition prevents a confused-deputy scenario
+          # where someone else's SES could publish here.
+          - Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref SesBouncesTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  SesBouncesSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref SesBouncesTopic
+      Protocol: email
+      Endpoint: !Ref SesBounceNotificationEmail
+
+  SesComplaintsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'discord-bot-${EnvironmentName}-ses-complaints'
+      DisplayName: 'SES Complaints (discord-bot)'
+      Tags:
+        - Key: Project
+          Value: c3-lab
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  SesComplaintsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref SesComplaintsTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref SesComplaintsTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  SesComplaintsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref SesComplaintsTopic
+      Protocol: email
+      Endpoint: !Ref SesBounceNotificationEmail
+
+  # Event destinations: tell the configuration set which SNS topics receive
+  # which event types. One destination per topic so the subscriptions stay
+  # cleanly separated.
+  SesBouncesEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName: !Ref SesConfigurationSet
+      EventDestination:
+        Name: bounces-and-rejects-to-sns
+        Enabled: true
+        # REJECT covers in-house SES rejections (recipient on the
+        # account-level suppression list, malformed message, etc.) --
+        # operationally close enough to bounces to share a topic.
+        MatchingEventTypes:
+          - bounce
+          - reject
+        SnsDestination:
+          TopicARN: !Ref SesBouncesTopic
+
+  SesComplaintsEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName: !Ref SesConfigurationSet
+      EventDestination:
+        Name: complaints-to-sns
+        Enabled: true
+        MatchingEventTypes:
+          - complaint
+        SnsDestination:
+          TopicARN: !Ref SesComplaintsTopic
 
   # -------------------------------------------------------------------------
   # EC2 IAM Role -- the runtime identity for the bot
@@ -560,6 +705,27 @@ Outputs:
     Value: !Ref ContainerLogGroup
     Export:
       Name: !Sub '${AWS::StackName}-ContainerLogGroup'
+
+  SesConfigurationSetName:
+    Description: SES configuration set name. After stack update, set
+                 SES_CONFIGURATION_SET to this value in your local .env
+                 and run scripts/aws/seed-ssm-parameters.sh production
+                 --overwrite to push it to SSM.
+    Value: !Ref SesConfigurationSet
+    Export:
+      Name: !Sub '${AWS::StackName}-SesConfigurationSetName'
+
+  SesBouncesTopicArn:
+    Description: ARN of the SNS topic receiving SES bounce + reject events.
+    Value: !Ref SesBouncesTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-SesBouncesTopicArn'
+
+  SesComplaintsTopicArn:
+    Description: ARN of the SNS topic receiving SES complaint events.
+    Value: !Ref SesComplaintsTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-SesComplaintsTopicArn'
 
   SsmStartSessionCommand:
     Description: Command to open a shell on the instance via Session Manager.

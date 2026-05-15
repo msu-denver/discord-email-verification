@@ -45,6 +45,11 @@ export const DYNAMODB_TABLE_NAME = process.env.DYNAMODB_TABLE_NAME || 'discord-v
 // Email configuration (Amazon SES)
 export const SES_FROM_EMAIL = process.env.SES_FROM_EMAIL || 'verification@example.edu';
 export const SES_FROM_NAME = process.env.SES_FROM_NAME || 'CyberBridge Discord Verification';
+// Optional. When set, every SendEmail call carries ConfigurationSetName,
+// which routes bounce/complaint events to the SES configuration set's
+// SNS destinations (see infrastructure/app.yaml). Leave empty for local
+// dev / LocalStack -- the bot then sends without a configuration set.
+export const SES_CONFIGURATION_SET = process.env.SES_CONFIGURATION_SET || '';
 
 // Verification settings
 export const CODE_EXPIRATION = 30 * 60 * 1000; // 30 minutes
