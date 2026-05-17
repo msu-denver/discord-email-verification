@@ -244,7 +244,14 @@ Capture stack outputs and add to GitHub repository variables: `AWS_DEPLOY_ROLE_A
 - CI builds and pushes the first image to ECR.
 
 ### 6. Deploy app stack (~10 min)
+
+Look up the current Amazon Linux 2023 AMI and pass it explicitly as `AmiId`. This makes the deploy reproducible: the AMI is part of the change set, not a side effect of when you happened to deploy.
+
 ```bash
+AMI_ID=$(aws ssm get-parameter \
+  --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+  --query Parameter.Value --output text --region "$AWS_REGION")
+
 aws cloudformation deploy \
   --stack-name discord-bot-production \
   --template-file infrastructure/app.yaml \
@@ -254,8 +261,10 @@ aws cloudformation deploy \
     KeyPairName=discord-bot-keypair \
     SesFromEmail=verify@bot.c3-lab.org \
     SesBounceNotificationEmail=<your-ops-email> \
+    AmiId=$AMI_ID \
   --region "$AWS_REGION"
 ```
+
 Capture the EC2 instance ID and add to GitHub repo variables as `EC2_INSTANCE_ID`. The stack also creates an SES configuration set and two SNS topics; AWS will email two subscription confirmation links to `SesBounceNotificationEmail` -- click both before assuming the pipeline works. After confirming, set `SES_CONFIGURATION_SET` in your local `.env` to the stack output `SesConfigurationSetName` (typically `discord-bot-production`) and run `./scripts/aws/seed-ssm-parameters.sh production --overwrite`.
 
 ### 7. Verify
@@ -267,18 +276,44 @@ Capture the EC2 instance ID and add to GitHub repo variables as `EC2_INSTANCE_ID
 
 ## Updating CloudFormation templates
 
-Stack updates can be deployed manually:
+Stack updates are deployed manually. The CI deploy role does not have CloudFormation permissions — infrastructure changes need a human at the keyboard who has seen the change set.
 
 ```bash
+# Get the current AMI ID; reuse this value for routine updates so they
+# don't incidentally swap the EC2 instance.
+AMI_ID=$(aws ec2 describe-instances \
+  --instance-ids $(aws cloudformation describe-stacks \
+    --stack-name discord-bot-production \
+    --query 'Stacks[0].Outputs[?OutputKey==`Ec2InstanceId`].OutputValue' \
+    --output text --region "$AWS_REGION") \
+  --query 'Reservations[0].Instances[0].ImageId' \
+  --output text --region "$AWS_REGION")
+
 aws cloudformation deploy \
   --stack-name discord-bot-production \
   --template-file infrastructure/app.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides ... \
+  --parameter-overrides \
+    VpcId=<from-stack-outputs> \
+    SubnetId=<from-stack-outputs> \
+    SesFromEmail=verify@bot.c3-lab.org \
+    SesBounceNotificationEmail=<your-ops-email> \
+    AmiId=$AMI_ID \
+  --no-execute-changeset \
   --region "$AWS_REGION"
 ```
 
-For changes that would replace resources (rare for us), CloudFormation creates new ones first and deletes old ones, so the bot stays up.
+`--no-execute-changeset` creates the change set but doesn't apply. Review with `aws cloudformation describe-change-set --change-set-name <arn>` before approving. If the changeset shows an EC2 instance replacement, the AmiId reuse trick above didn't catch the right value — confirm by running `aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64` and comparing.
+
+To intentionally refresh the AMI (security patches), substitute the SSM lookup:
+
+```bash
+AMI_ID=$(aws ssm get-parameter \
+  --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+  --query Parameter.Value --output text --region "$AWS_REGION")
+```
+
+An AMI refresh replaces the EC2 instance (new instance ID, brief outage), and you must update the GitHub repo variable `EC2_INSTANCE_ID` with the new value or the next CI deploy will fail.
 
 For changes that update in place (most common — IAM policy edits, security group rule changes), the bot's container keeps running unmodified. We trigger a redeploy separately if the container itself needs to pick up the change.
 
