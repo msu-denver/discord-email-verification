@@ -101,10 +101,15 @@ Parameters:
     AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
 
   AmiId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
-    Description: Amazon Linux 2023 AMI (resolved from SSM Parameter Store
-                 -- always the latest; we don't pin in the template).
+    Type: AWS::EC2::Image::Id
+    Description: |
+      Amazon Linux 2023 AMI ID for the EC2 instance. Required on every
+      deploy. Look up the current AL2023 AMI with
+      "aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+      --query Parameter.Value --output text". Passing the AMI ID
+      explicitly (rather than auto-resolving from SSM) means incidental
+      deploys do not silently pull in a new AMI and force EC2 replacement.
+      AMI refreshes are intentional, planned changes -- not side effects.
 
 Conditions:
   HasSshIngress: !Not [!Equals [!Ref SshIngressCidr, '']]
