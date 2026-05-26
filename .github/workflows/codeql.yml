@@ -13,9 +13,9 @@ name: CodeQL
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   schedule:
     # Weekly, Wednesdays at 14:23 UTC. Off-peak for ubuntu-latest runners.
     - cron: '23 14 * * 3'
