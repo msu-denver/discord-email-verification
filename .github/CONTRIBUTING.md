@@ -23,7 +23,7 @@ Full local-development walkthrough is in the main [README](../README.md). Archit
 
 ## Pull request flow
 
-1. Fork or branch off `main`.
+1. Fork or branch off `develop` (the integration branch). `main` is release-only — release PRs go `develop → main` via rebase-merge.
 2. Make your change. Keep PRs focused — one logical change per PR.
 3. **Add or update tests.** New code paths need tests; refactors should keep coverage steady. The full suite is in `tests/` (Vitest).
 4. Run locally before pushing:
@@ -32,8 +32,18 @@ Full local-development walkthrough is in the main [README](../README.md). Archit
    node --check src/*.js src/commands/*.js
    npm run audit            # 0 high-severity production vulns
    ```
-5. Open a PR. CI runs on Node 20 and 22, lints, audits dependencies, runs CodeQL, and reviews any new dependencies. Deploy to AWS only fires on push to `main`.
+5. Open a PR against `develop`. CI runs on Node 20 and 22, lints, audits dependencies, runs CodeQL, and reviews any new dependencies. Deploy to AWS only fires on push to `main`.
 6. Files under `.github/`, `infrastructure/`, `scripts/`, `Dockerfile*`, and `package*.json` require a [CODEOWNERS](./CODEOWNERS) review (currently `@daniel-pittman`). Other paths just need any maintainer's approval.
+
+## Automated reviews
+
+Three Claude-driven workflows run on PRs to help land changes quickly and safely:
+
+- **Code review** — runs automatically on every PR open and every new push. Claude reviews the diff and posts inline comments and a summary review. Iterate on its feedback the same way you would with a human reviewer; reply or push fixes and it re-reviews on the next push.
+- **Security review** — runs automatically on PRs targeting `main` or `develop`. Focused on injection, secrets, IAM/IaC regressions, and supply-chain shifts. A maintainer can manually re-run it from the Actions tab via *workflow_dispatch*.
+- **`@claude` bot** — mention `@claude` in an issue, PR comment, or PR review and Claude will respond. Restricted to repository collaborators (write access required); drive-by mentions from outside contributors do not trigger it.
+
+You don't need to do anything to opt in — these run by default on every PR.
 
 ## Coding conventions
 
