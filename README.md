@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/msu-denver/discord-email-verification/actions/workflows/ci.yml/badge.svg)](https://github.com/msu-denver/discord-email-verification/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/msu-denver/discord-email-verification/actions/workflows/codeql.yml/badge.svg)](https://github.com/msu-denver/discord-email-verification/actions/workflows/codeql.yml)
-[![Tests](https://img.shields.io/badge/tests-78%20passing-brightgreen)](./tests)
+[![GitHub release](https://img.shields.io/github/v/release/msu-denver/discord-email-verification?sort=semver)](https://github.com/msu-denver/discord-email-verification/releases)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
 [![discord.js](https://img.shields.io/badge/discord.js-v14-5865F2)](https://discord.js.org/)
 [![Vitest](https://img.shields.io/badge/tested%20with-vitest%204-6e9f18)](https://vitest.dev/)
