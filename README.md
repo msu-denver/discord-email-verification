@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/img/social-preview.png" alt="discord-email-verification — educational email verification for Discord communities" width="720">
+</p>
+
 # Discord Email Verification Bot
 
 [![CI](https://github.com/msu-denver/discord-email-verification/actions/workflows/ci.yml/badge.svg)](https://github.com/msu-denver/discord-email-verification/actions/workflows/ci.yml)
