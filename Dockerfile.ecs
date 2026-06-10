@@ -13,7 +13,7 @@
 # Local dev still uses ./Dockerfile (simpler, no pinning) and docker-compose.
 
 # ---------- Stage 1: Builder ----------
-FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f AS builder
+FROM node:26-alpine@sha256:144769ec3f32e8ee36b3cfde91e82bee25d9367b20f31a151f3f7eea3a2a8541 AS builder
 
 WORKDIR /build
 
@@ -28,7 +28,7 @@ RUN npm ci --ignore-scripts --omit=dev
 
 
 # ---------- Stage 2: Runtime ----------
-FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f AS runtime
+FROM node:26-alpine@sha256:144769ec3f32e8ee36b3cfde91e82bee25d9367b20f31a151f3f7eea3a2a8541 AS runtime
 
 # Tini handles signal forwarding and reaps zombies — important for
 # Discord.js graceful shutdown when the container receives SIGTERM.
