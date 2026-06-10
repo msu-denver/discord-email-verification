@@ -147,7 +147,7 @@ jobs:
           {
             printf '%s\n\n' "$MARKER"
             if [ "$conclusion" = "success" ]; then
-              printf '✅ **Tests passed** — the vitest unit suite (Node 20 + Node 22 matrix), lint, and dependency review are green on `%s`.\n' "${SHA:0:9}"
+              printf '✅ **Tests passed**: the vitest unit suite (Node 20 + Node 22 matrix), lint, and dependency review are green on `%s`.\n' "${SHA:0:9}"
             elif [ "$conclusion" = "failure" ]; then
               printf '❌ **CI failed** on `%s`. Failing output (truncated):\n\n```\n' "${SHA:0:9}"
               gh run view "$runid" --repo "$REPO" --log-failed 2>/dev/null \
