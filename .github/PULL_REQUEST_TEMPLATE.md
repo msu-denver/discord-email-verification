@@ -13,9 +13,14 @@ Delete sections that don't apply.
 
 ## Test plan
 
-<!-- How did you verify this works? Check what applies. -->
+<!--
+How did you verify this works? Check what applies. Setup and run instructions
+live in the repository README:
+https://github.com/msu-denver/discord-email-verification#readme
+-->
 
-- [ ] `npm test` passes locally
+- [ ] `npm install` succeeds
+- [ ] `npm test` passes locally (Vitest)
 - [ ] Added or updated tests for the changed behavior
 - [ ] `node --check src/*.js src/commands/*.js` passes
 - [ ] `npm run audit` shows 0 high-severity issues

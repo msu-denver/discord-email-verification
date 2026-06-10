@@ -37,3 +37,25 @@ updates:
     labels:
       - dependencies
       - github-actions
+    # Group minor + patch action bumps into one PR per week to reduce noise.
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Docker base images (Dockerfile + Dockerfile.ecs at the repo root)
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+    groups:
+      docker-minor-and-patch:
+        update-types:
+          - minor
+          - patch

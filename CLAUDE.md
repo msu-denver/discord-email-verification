@@ -6,6 +6,13 @@ This file provides context for AI assistants working on this codebase.
 
 Discord email verification bot for the MSU Denver CS Department. Members join the server, get a quarantine role, verify their educational email via a code sent through Amazon SES, and receive a verified role. Built with discord.js v14 and deployed on AWS.
 
+## Automated Review Policy
+
+The PR review workflow enforces two rules the automated reviewer applies on every pull request:
+
+- **Tests ship with code.** If a PR changes application or library source code in a way that warrants tests (new or changed behavior, bug fixes, new branches or edge cases) and does not add or update corresponding tests, the reviewer flags it as a HIGH-severity finding. Docs-only, README, comments, formatting, and pure-configuration changes (CI YAML, lockfile bumps, asset-only, version bumps) are exempt.
+- **Semgrep findings inform the review.** A free Semgrep (OSS) scan runs before the Claude review and posts its findings as a PR comment, which the reviewer folds into its analysis. It scans with the `p/javascript`, `p/nodejs`, `p/secrets`, `p/ci`, and `p/dockerfile` rule packs. This replaces the metered Claude security-review job.
+
 ## Tech Stack
 
 - **Runtime**: Node.js 22, ES modules (`"type": "module"` in package.json)
