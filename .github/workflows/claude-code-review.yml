@@ -55,13 +55,12 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - name: Install Semgrep (OSS, pinned, no token)
-        run: pip install semgrep==1.165.0
+        # Use pipx (preinstalled on the runner) instead of actions/setup-python:
+        # this repo requires every action to be pinned to a full commit SHA, and
+        # pipx avoids adding another action to SHA-pin while still isolating the
+        # install and putting semgrep on PATH.
+        run: pipx install semgrep==1.165.0
 
       - name: Run Semgrep
         # --error sets a non-zero exit on findings; `|| true` keeps the job
