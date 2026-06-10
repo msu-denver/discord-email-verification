@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   localstack:
-    image: localstack/localstack
+    image: localstack/localstack:4.14.0
     container_name: verification-bot-localstack
     ports:
       - "4566:4566"
