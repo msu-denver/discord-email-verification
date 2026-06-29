@@ -197,7 +197,7 @@ jobs:
       # 2026-05-26). Bump by re-resolving the v1 tag's target commit:
       #   gh api repos/anthropics/claude-code-action/git/refs/tags/v1
       - name: Run Claude code review
-        uses: anthropics/claude-code-action@51705da45eecce209d4700538bf8377d5b5fc695 # v1.0.152
+        uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464 # v1.0.159
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
@@ -298,7 +298,7 @@ jobs:
       # as steps.extract.outputs.structured_output — no comment, no log-file parse.
       - name: Extract the merge verdict
         id: extract
-        uses: anthropics/claude-code-action@51705da45eecce209d4700538bf8377d5b5fc695 # v1.0.152
+        uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464 # v1.0.159
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # track_progress off: this is a data task, not a PR conversation; we read
