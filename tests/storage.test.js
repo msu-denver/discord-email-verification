@@ -91,6 +91,81 @@ describe('saveCodeToStorage', () => {
     expect(data.email).toBe('student@test.edu');
     expect(data.code).toBe('ABCD1234');
   });
+
+  it('starts the attempt counter at zero and records the TTL expiry', async () => {
+    const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+    await storage.saveCodeToStorage('user123', 'student@test.edu', 'ABCD1234', expiresAt);
+
+    const data = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, 'pending_codes', 'user123.json'), 'utf-8')
+    );
+    expect(data.attempts).toBe(0);
+    expect(data.expiresAt).toBe(expiresAt);
+  });
+});
+
+// ---------- pending-code recovery ----------
+
+describe('getPendingCode', () => {
+  it('returns null when the user has nothing pending', async () => {
+    expect(await storage.getPendingCode('nobody')).toBeNull();
+  });
+
+  it('round-trips a saved code, which is what survives a restart', async () => {
+    await storage.saveCodeToStorage('user123', 'student@test.edu', 'ABCD1234', 999);
+
+    const pending = await storage.getPendingCode('user123');
+    expect(pending).toMatchObject({
+      email: 'student@test.edu',
+      code: 'ABCD1234',
+      attempts: 0,
+    });
+    expect(Date.parse(pending.createdAt)).not.toBeNaN();
+  });
+
+  it('reports zero attempts for a record written before the field existed', async () => {
+    // Rows saved by the previous build have no `attempts` key; defaulting to
+    // undefined would make the 3-strike arithmetic produce NaN.
+    const filePath = path.join(tmpDir, 'pending_codes', 'legacy.json');
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        userId: 'legacy',
+        email: 'old@test.edu',
+        code: 'OLD12345',
+        createdAt: new Date().toISOString(),
+      })
+    );
+
+    expect((await storage.getPendingCode('legacy')).attempts).toBe(0);
+  });
+});
+
+describe('updatePendingAttempts', () => {
+  it('persists the counter for the next read', async () => {
+    await storage.saveCodeToStorage('user123', 'student@test.edu', 'ABCD1234', 999);
+    await storage.updatePendingAttempts('user123', 2);
+
+    expect((await storage.getPendingCode('user123')).attempts).toBe(2);
+  });
+
+  it('reports failure instead of creating a record that was never pending', async () => {
+    expect(await storage.updatePendingAttempts('nobody', 1)).toBe(false);
+    expect(await storage.getPendingCode('nobody')).toBeNull();
+  });
+});
+
+describe('deletePendingCode', () => {
+  it('removes the record so it cannot be rehydrated', async () => {
+    await storage.saveCodeToStorage('user123', 'student@test.edu', 'ABCD1234', 999);
+    await storage.deletePendingCode('user123');
+
+    expect(await storage.getPendingCode('user123')).toBeNull();
+  });
+
+  it('succeeds when there is nothing to delete', async () => {
+    expect(await storage.deletePendingCode('nobody')).toBe(true);
+  });
 });
 
 // ---------- moveToUsedCodes ----------

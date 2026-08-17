@@ -106,7 +106,10 @@ export async function handleVerifyCommand(interaction) {
     attempts: 0,
   });
 
-  await storage.saveCodeToStorage(interaction.user.id, email, code);
+  // Epoch seconds for the storage-side TTL; the user-facing expiry is still
+  // enforced against `timestamp` in handleVerifyCodeCommand.
+  const expiresAtEpochSeconds = Math.floor((Date.now() + CODE_EXPIRATION) / 1000);
+  await storage.saveCodeToStorage(interaction.user.id, email, code, expiresAtEpochSeconds);
   const emailSent = await sendVerificationEmail(email, code);
 
   if (emailSent) {
@@ -135,7 +138,27 @@ export async function handleVerifyCommand(interaction) {
  */
 export async function handleVerifyCodeCommand(interaction) {
   const userId = interaction.user.id;
-  const data = pendingVerifications.get(userId);
+  let data = pendingVerifications.get(userId);
+
+  // A restart empties this map while the durable row survives, which used to
+  // strand anyone holding a valid code in their inbox. Fall back to storage
+  // before claiming there is nothing pending, and rehydrate the map so the
+  // rest of this request (and any retry) behaves like an uninterrupted run.
+  if (!data) {
+    const stored = await storage.getPendingCode(userId);
+    if (stored) {
+      const createdAtMs = Date.parse(stored.createdAt);
+      data = {
+        email: stored.email,
+        code: stored.code,
+        // An unparseable timestamp expires the code rather than granting it an
+        // unbounded lifetime, since NaN fails every comparison below.
+        timestamp: Number.isNaN(createdAtMs) ? 0 : createdAtMs,
+        attempts: stored.attempts,
+      };
+      pendingVerifications.set(userId, data);
+    }
+  }
 
   if (!data) {
     return interaction.reply({
@@ -147,6 +170,7 @@ export async function handleVerifyCodeCommand(interaction) {
   // Expired?
   if (Date.now() - data.timestamp > CODE_EXPIRATION) {
     pendingVerifications.delete(userId);
+    await storage.deletePendingCode(userId);
     return interaction.reply({
       content: 'Your verification code has expired. Please use the `/verify` command again to request a new code.',
       flags: MessageFlags.Ephemeral,
@@ -169,6 +193,7 @@ export async function handleVerifyCodeCommand(interaction) {
   data.attempts += 1;
   if (data.attempts > 3) {
     pendingVerifications.delete(userId);
+    await storage.deletePendingCode(userId);
     return interaction.reply({
       content: "You've made too many incorrect attempts. Please use the `/verify` command again to request a new code.",
       flags: MessageFlags.Ephemeral,
@@ -176,6 +201,8 @@ export async function handleVerifyCodeCommand(interaction) {
   }
 
   if (submittedCode !== data.code) {
+    // Persist the counter so a restart cannot hand back a fresh set of guesses.
+    await storage.updatePendingAttempts(userId, data.attempts);
     const attemptsLeft = 3 - data.attempts;
     return interaction.reply({
       content:

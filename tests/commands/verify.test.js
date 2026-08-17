@@ -21,6 +21,9 @@ const mockStorage = {
   getEmailVerificationCount: vi.fn(),
   saveCodeToStorage: vi.fn(),
   moveToUsedCodes: vi.fn(),
+  getPendingCode: vi.fn(),
+  updatePendingAttempts: vi.fn(),
+  deletePendingCode: vi.fn(),
 };
 vi.mock('../../src/storage.js', () => ({ default: mockStorage }));
 
@@ -73,6 +76,11 @@ beforeEach(() => {
   mockStorage.getEmailVerificationCount.mockResolvedValue(0);
   mockStorage.saveCodeToStorage.mockResolvedValue(true);
   mockStorage.moveToUsedCodes.mockResolvedValue(true);
+  // Default: nothing durable to recover, so the in-memory map is the only
+  // source. Tests covering restart recovery override this per case.
+  mockStorage.getPendingCode.mockResolvedValue(null);
+  mockStorage.updatePendingAttempts.mockResolvedValue(true);
+  mockStorage.deletePendingCode.mockResolvedValue(true);
   mockSendEmail.mockResolvedValue(true);
 });
 
@@ -296,5 +304,176 @@ describe('handleVerifyCodeCommand', () => {
     expect(interaction.reply).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining('Verification successful') })
     );
+  });
+});
+
+// ---------- Restart recovery ----------
+//
+// An empty pendingVerifications map with a populated storage record is exactly
+// the state the process wakes up in after a deploy or crash, so every case here
+// leaves the map empty on purpose.
+
+describe('handleVerifyCodeCommand after a restart', () => {
+  it('recovers a pending verification from storage', async () => {
+    mockStorage.getPendingCode.mockResolvedValue({
+      email: 'user@test.edu',
+      code: 'GOOD1234',
+      attempts: 0,
+      createdAt: new Date().toISOString(),
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('GOOD1234');
+
+    await handleVerifyCodeCommand(interaction);
+
+    expect(mockStorage.getPendingCode).toHaveBeenCalledWith('user-1');
+    expect(interaction.member.roles.remove).toHaveBeenCalledWith('quarantine-role');
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Verification successful') })
+    );
+  });
+
+  it('carries the persisted attempt count instead of restarting the count', async () => {
+    mockStorage.getPendingCode.mockResolvedValue({
+      email: 'user@test.edu',
+      code: 'RIGHT123',
+      attempts: 2,
+      createdAt: new Date().toISOString(),
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('WRONG999');
+
+    await handleVerifyCodeCommand(interaction);
+
+    // Third strike of three, not the first of a fresh set.
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('0 attempts left') })
+    );
+  });
+
+  it('rejects a recovered code that is already past expiry', async () => {
+    mockStorage.getPendingCode.mockResolvedValue({
+      email: 'user@test.edu',
+      code: 'OLDCODE1',
+      attempts: 0,
+      createdAt: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('OLDCODE1');
+
+    await handleVerifyCodeCommand(interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('expired') })
+    );
+    expect(mockStorage.deletePendingCode).toHaveBeenCalledWith('user-1');
+  });
+
+  it('treats an unparseable createdAt as expired rather than eternal', async () => {
+    // NaN loses every comparison, so a naive implementation would accept this
+    // record forever instead of rejecting it.
+    mockStorage.getPendingCode.mockResolvedValue({
+      email: 'user@test.edu',
+      code: 'GOOD1234',
+      attempts: 0,
+      createdAt: 'not-a-timestamp',
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('GOOD1234');
+
+    await handleVerifyCodeCommand(interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('expired') })
+    );
+    expect(interaction.member.roles.remove).not.toHaveBeenCalled();
+  });
+
+  it('still reports nothing pending when storage is also empty', async () => {
+    mockStorage.getPendingCode.mockResolvedValue(null);
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('GOOD1234');
+
+    await handleVerifyCodeCommand(interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('pending verification') })
+    );
+  });
+
+  it('does not query storage when the in-memory entry is present', async () => {
+    pendingVerifications.set('user-1', {
+      email: 'user@test.edu',
+      code: 'GOOD1234',
+      timestamp: Date.now(),
+      attempts: 0,
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('GOOD1234');
+
+    await handleVerifyCodeCommand(interaction);
+
+    expect(mockStorage.getPendingCode).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- Durable attempt tracking ----------
+
+describe('pending-code persistence', () => {
+  it('records a TTL expiry alongside the code', async () => {
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('user@test.edu');
+
+    await handleVerifyCommand(interaction);
+
+    const [userId, email, code, expiresAt] = mockStorage.saveCodeToStorage.mock.calls[0];
+    expect(userId).toBe('user-1');
+    expect(email).toBe('user@test.edu');
+    expect(code).toBe('TEST1234');
+
+    // Epoch SECONDS roughly CODE_EXPIRATION (30 min) out. A milliseconds value
+    // would be ~1000x larger and would park the row far in the future.
+    const expectedSeconds = Math.floor((Date.now() + 30 * 60 * 1000) / 1000);
+    expect(expiresAt).toBeGreaterThan(expectedSeconds - 60);
+    expect(expiresAt).toBeLessThan(expectedSeconds + 60);
+  });
+
+  it('persists the attempt counter on a wrong code', async () => {
+    pendingVerifications.set('user-1', {
+      email: 'user@test.edu',
+      code: 'RIGHT123',
+      timestamp: Date.now(),
+      attempts: 0,
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('WRONG999');
+
+    await handleVerifyCodeCommand(interaction);
+
+    expect(mockStorage.updatePendingAttempts).toHaveBeenCalledWith('user-1', 1);
+  });
+
+  it('clears the durable record once attempts are exhausted', async () => {
+    pendingVerifications.set('user-1', {
+      email: 'user@test.edu',
+      code: 'RIGHT123',
+      timestamp: Date.now(),
+      attempts: 3,
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('WRONG999');
+
+    await handleVerifyCodeCommand(interaction);
+
+    // Otherwise the next restart would rehydrate a lockout the user already hit.
+    expect(mockStorage.deletePendingCode).toHaveBeenCalledWith('user-1');
   });
 });
