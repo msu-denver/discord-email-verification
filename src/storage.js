@@ -21,6 +21,7 @@ const {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  UpdateCommand,
   DeleteCommand,
   QueryCommand,
   BatchWriteCommand,
@@ -31,6 +32,12 @@ import {
   DYNAMODB_TABLE_NAME,
 } from './config.js';
 import { ensureDirectoryExists } from './utils.js';
+
+// Pending verifications are keyed by user, not by code, because every read is
+// "what is this user waiting on?" (a /verifycode submission, an expiry check).
+// A constant sort key keeps one pending verification per user, matching the
+// in-memory map that a second /verify overwrites.
+const PENDING_SK = 'PENDING';
 
 // ---------------------------------------------------------------------------
 // DynamoDB Storage
@@ -134,24 +141,104 @@ export class DynamoDBStorage {
    * @param {string} code - Generated verification code
    * @returns {Promise<boolean>}
    */
-  async saveCodeToStorage(userId, email, code) {
+  async saveCodeToStorage(userId, email, code, expiresAtEpochSeconds) {
     try {
       await this.docClient.send(
         new PutCommand({
           TableName: this.tableName,
           Item: {
-            PK: `CODE#${code}`,
-            SK: `USER#${userId}`,
+            PK: `PENDING#${userId}`,
+            SK: PENDING_SK,
             email,
             code,
             userId,
+            attempts: 0,
             createdAt: new Date().toISOString(),
+            // Drives the table's TTL. DynamoDB deletes expired items on its own
+            // schedule (typically hours, guaranteed only within 48h), so this
+            // reclaims abandoned rows but must never be the expiry check the
+            // user experiences -- handleVerifyCodeCommand still compares
+            // timestamps itself.
+            expiresAt: expiresAtEpochSeconds,
           },
         })
       );
       return true;
     } catch (err) {
       console.error('[DynamoDBStorage] Error saving code:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Read back a user's pending verification. Lets /verifycode survive a bot
+   * restart, which drops the in-memory map but leaves this row intact.
+   * @param {string} userId
+   * @returns {Promise<{email: string, code: string, attempts: number, createdAt: string} | null>}
+   */
+  async getPendingCode(userId) {
+    try {
+      const result = await this.docClient.send(
+        new GetCommand({
+          TableName: this.tableName,
+          Key: { PK: `PENDING#${userId}`, SK: PENDING_SK },
+        })
+      );
+      if (!result.Item) return null;
+
+      const { email, code, attempts, createdAt } = result.Item;
+      return { email, code, attempts: attempts ?? 0, createdAt };
+    } catch (err) {
+      console.error('[DynamoDBStorage] Error reading pending code:', err.message);
+      return null;
+    }
+  }
+
+  /**
+   * Persist the failed-attempt counter so the 3-strike limit is not silently
+   * reset by a restart.
+   * @param {string} userId
+   * @param {number} attempts
+   * @returns {Promise<boolean>}
+   */
+  async updatePendingAttempts(userId, attempts) {
+    try {
+      await this.docClient.send(
+        new UpdateCommand({
+          TableName: this.tableName,
+          Key: { PK: `PENDING#${userId}`, SK: PENDING_SK },
+          UpdateExpression: 'SET attempts = :a',
+          // Do not resurrect a row that expiry, exhaustion, or a successful
+          // verification already deleted.
+          ConditionExpression: 'attribute_exists(PK)',
+          ExpressionAttributeValues: { ':a': attempts },
+        })
+      );
+      return true;
+    } catch (err) {
+      if (err.name === 'ConditionalCheckFailedException') return false;
+      console.error('[DynamoDBStorage] Error updating attempts:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Drop a pending verification that ended without success (expired, or too
+   * many wrong codes), so it cannot be rehydrated after a restart.
+   * @param {string} userId
+   * @returns {Promise<boolean>}
+   */
+  async deletePendingCode(userId) {
+    try {
+      await this.docClient.send(
+        new DeleteCommand({
+          TableName: this.tableName,
+          Key: { PK: `PENDING#${userId}`, SK: PENDING_SK },
+        })
+      );
+      return true;
+    } catch (err) {
+      console.error('[DynamoDBStorage] Error deleting pending code:', err.message);
       return false;
     }
   }
@@ -191,7 +278,7 @@ export class DynamoDBStorage {
       await this.docClient.send(
         new DeleteCommand({
           TableName: this.tableName,
-          Key: { PK: `CODE#${code}`, SK: `USER#${userId}` },
+          Key: { PK: `PENDING#${userId}`, SK: PENDING_SK },
         })
       );
       await this.docClient.send(
@@ -351,14 +438,81 @@ export class LocalStorage {
    * @param {string} code - Generated verification code
    * @returns {Promise<boolean>}
    */
-  async saveCodeToStorage(userId, email, code) {
+  async saveCodeToStorage(userId, email, code, expiresAtEpochSeconds) {
     try {
       const filePath = path.join(this.codesDir, `${userId}.json`);
-      const data = { userId, email, code, createdAt: new Date().toISOString() };
+      const data = {
+        userId,
+        email,
+        code,
+        attempts: 0,
+        createdAt: new Date().toISOString(),
+        // Mirrors the DynamoDB TTL attribute for parity. Nothing sweeps these
+        // files in local development; the expiry the user experiences is the
+        // timestamp check in handleVerifyCodeCommand, same as production.
+        expiresAt: expiresAtEpochSeconds,
+      };
       fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
       return true;
     } catch (err) {
       console.error('[LocalStorage] Error saving code:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Read back a user's pending verification.
+   * @param {string} userId
+   * @returns {Promise<{email: string, code: string, attempts: number, createdAt: string} | null>}
+   */
+  async getPendingCode(userId) {
+    try {
+      const filePath = path.join(this.codesDir, `${userId}.json`);
+      if (!fs.existsSync(filePath)) return null;
+
+      const { email, code, attempts, createdAt } = JSON.parse(
+        fs.readFileSync(filePath, 'utf-8')
+      );
+      return { email, code, attempts: attempts ?? 0, createdAt };
+    } catch (err) {
+      console.error('[LocalStorage] Error reading pending code:', err.message);
+      return null;
+    }
+  }
+
+  /**
+   * Persist the failed-attempt counter.
+   * @param {string} userId
+   * @param {number} attempts
+   * @returns {Promise<boolean>}
+   */
+  async updatePendingAttempts(userId, attempts) {
+    try {
+      const filePath = path.join(this.codesDir, `${userId}.json`);
+      if (!fs.existsSync(filePath)) return false;
+
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      data.attempts = attempts;
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+      return true;
+    } catch (err) {
+      console.error('[LocalStorage] Error updating attempts:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Drop a pending verification that ended without success.
+   * @param {string} userId
+   * @returns {Promise<boolean>}
+   */
+  async deletePendingCode(userId) {
+    try {
+      const filePath = path.join(this.codesDir, `${userId}.json`);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      return true;
+    } catch (err) {
+      console.error('[LocalStorage] Error deleting pending code:', err.message);
       return false;
     }
   }
