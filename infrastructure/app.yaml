@@ -140,8 +140,12 @@ Resources:
   #
   # Item types:
   #   PK=CONFIG SK=DOMAINS              -> allowed email domains list
-  #   PK=CODE#<code> SK=USER#<userId>   -> pending verification (not currently used)
+  #   PK=PENDING#<userId> SK=PENDING    -> pending verification, read back by
+  #                                        /verifycode after a bot restart
   #   PK=USED#<email> SK=<timestamp>    -> completed verification (one per attempt)
+  #
+  # Pending rows carry an `expiresAt` epoch-second attribute driving the TTL
+  # below, so codes abandoned mid-flow are reclaimed instead of accumulating.
   # -------------------------------------------------------------------------
   VerificationTable:
     Type: AWS::DynamoDB::Table
@@ -160,6 +164,13 @@ Resources:
           KeyType: RANGE
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+      # Garbage-collects abandoned pending verifications. DynamoDB deletes on
+      # its own schedule (guaranteed only within 48h of expiry), so this is
+      # cleanup only; the expiry a user experiences is enforced in application
+      # code against the record's createdAt.
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
       Tags:
         - Key: Project
           Value: c3-lab
