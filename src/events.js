@@ -142,6 +142,11 @@ export default function setupEventHandlers(client) {
   // MessageContent intent every `content` is an empty string, so the pattern
   // never matches and this handler is inert; the flag keeps that intent
   // un-requested unless the portal toggle is on (see config.js).
+  //
+  // Deliberately not scoped to VERIFICATION_CHANNEL_ID: the people who need
+  // this are quarantined, and the quarantine role already limits them to that
+  // channel, so a scope check would reject almost nothing while dropping the
+  // nudge for anyone asking from a DM or another channel.
   client.on('messageCreate', async (message) => {
     if (!ENABLE_PLAINTEXT_COMMAND_NUDGE) return;
 
@@ -149,7 +154,8 @@ export default function setupEventHandlers(client) {
       // Ignore this bot's own nudges (and every other bot) so two bots posting
       // command-shaped text can never answer each other in a loop.
       if (message.author?.bot) return;
-      if (!PLAINTEXT_COMMAND_RE.test(message.content?.trim() ?? '')) return;
+      const content = message.content?.trim() ?? '';
+      if (!PLAINTEXT_COMMAND_RE.test(content)) return;
 
       console.log(
         `[messageCreate] Plain-text command from ${message.author?.tag}, sending nudge`
@@ -162,7 +168,7 @@ export default function setupEventHandlers(client) {
         '2. Choose **`/verify`** from the list that appears\n' +
         '3. Fill in the `email` field, then press Enter';
 
-      if (LOOKS_LIKE_EMAIL_RE.test(message.content)) {
+      if (LOOKS_LIKE_EMAIL_RE.test(content)) {
         nudge +=
           '\n\nHeads up: because it posted as a normal message, your email address ' +
           'is visible to this channel. You may want to delete it.';
