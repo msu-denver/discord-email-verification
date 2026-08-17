@@ -14,12 +14,24 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Reply to messages where a user typed "/verify" as plain text instead of
+// selecting the slash command. Reading message text requires the MessageContent
+// PRIVILEGED intent, which must ALSO be enabled in the Discord Developer Portal
+// (Bot -> Privileged Gateway Intents -> Message Content Intent). Requesting the
+// intent here while the portal toggle is off makes client.login() reject with
+// DisallowedIntents and the bot never starts, so this stays opt-in: turn the
+// portal toggle on first, then set this to true.
+export const ENABLE_PLAINTEXT_COMMAND_NUDGE =
+  process.env.ENABLE_PLAINTEXT_COMMAND_NUDGE === 'true';
+
 // Discord Bot client — discord.js v14 uses GatewayIntentBits enum instead of Intents.FLAGS
 export const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
+    // Privileged; only requested when the nudge is switched on (see above).
+    ...(ENABLE_PLAINTEXT_COMMAND_NUDGE ? [GatewayIntentBits.MessageContent] : []),
   ],
   partials: [Partials.Channel],
 });

@@ -76,6 +76,6 @@ Configuration is via `.env` file (see `.env.example`). Key settings for local de
 
 ## Discord Bot Requirements
 
-- **Intents**: GuildMembers, GuildMessages, Guilds
+- **Intents**: GuildMembers, GuildMessages, Guilds. MessageContent is added only when `ENABLE_PLAINTEXT_COMMAND_NUDGE=true`; it is privileged, so the portal toggle must be on first or `client.login()` rejects with `DisallowedIntents` and the bot never starts.
 - **Permissions**: Manage Roles, Send Messages, Read Message History
 - **Role hierarchy**: Bot role must be above Quarantine and Verified roles in the server's role list
