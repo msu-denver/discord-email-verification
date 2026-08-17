@@ -12,6 +12,7 @@ import {
   QUARANTINE_ROLE_ID,
   SERVER_ID,
   SERVER_NAME,
+  ENABLE_PLAINTEXT_COMMAND_NUDGE,
 } from './config.js';
 import { handleVerifyCommand, handleVerifyCodeCommand } from './commands/verify.js';
 import { handleAdminCommand } from './commands/admin.js';
@@ -21,6 +22,18 @@ import { writeHeartbeat } from './utils.js';
 // modified within the last 90 seconds (so a single missed tick is OK,
 // but a real disconnect surfaces in ~3 minutes via 3 retries).
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
+
+// A slash command only reaches the bot when the user picks it from Discord's
+// command menu. Typing the same characters by hand posts an ordinary message
+// that never arrives as an interaction, so the verification silently does
+// nothing from the user's point of view. Matches "/verify" and "/verifycode"
+// only as whole command words, so "/verifying..." is left alone.
+const PLAINTEXT_COMMAND_RE = /^\/verify(code)?\b/i;
+
+// Loose on purpose: this only decides whether to warn someone that they just
+// posted their address publicly, so a false positive costs an extra sentence
+// and a false negative costs a missed privacy heads-up.
+const LOOKS_LIKE_EMAIL_RE = /\S+@\S+\.\S+/;
 
 /**
  * Set up all Discord event handlers on the client.
@@ -72,8 +85,12 @@ export default function setupEventHandlers(client) {
           await verificationChannel.send({
             content:
               `Welcome to ${SERVER_NAME}'s Discord community, ${member}!\n\n` +
-              'To get verified, please use the `/verify` command with your school email address.\n\n' +
-              'Example: `/verify email:your.name@msudenver.edu`',
+              'To get verified:\n' +
+              '1. Type `/` in the message box\n' +
+              '2. **Pick `/verify` from the menu that pops up** (typing or pasting the ' +
+              'command as plain text will not work, Discord only sends it when you ' +
+              'select it from the menu)\n' +
+              '3. Fill in the `email` field with your school email, then press Enter',
           });
         }
       }
@@ -118,6 +135,50 @@ export default function setupEventHandlers(client) {
           content: 'An error occurred while processing your command. Please try again later or contact a server admin.',
         });
       }
+    }
+  });
+
+  // Rescue users who typed a command instead of selecting it. Without the
+  // MessageContent intent every `content` is an empty string, so the pattern
+  // never matches and this handler is inert; the flag keeps that intent
+  // un-requested unless the portal toggle is on (see config.js).
+  //
+  // Deliberately not scoped to VERIFICATION_CHANNEL_ID: the people who need
+  // this are quarantined, and the quarantine role already limits them to that
+  // channel, so a scope check would reject almost nothing while dropping the
+  // nudge for anyone asking from a DM or another channel.
+  client.on('messageCreate', async (message) => {
+    if (!ENABLE_PLAINTEXT_COMMAND_NUDGE) return;
+
+    try {
+      // Ignore this bot's own nudges (and every other bot) so two bots posting
+      // command-shaped text can never answer each other in a loop.
+      if (message.author?.bot) return;
+      const content = message.content?.trim() ?? '';
+      if (!PLAINTEXT_COMMAND_RE.test(content)) return;
+
+      console.log(
+        `[messageCreate] Plain-text command from ${message.author?.tag}, sending nudge`
+      );
+
+      let nudge =
+        `${message.author}, that came through as a normal message, so I never ` +
+        'received it. Discord only sends a slash command when you pick it from the menu:\n\n' +
+        '1. Type `/` in the message box\n' +
+        '2. Choose **`/verify`** from the list that appears\n' +
+        '3. Fill in the `email` field, then press Enter';
+
+      if (LOOKS_LIKE_EMAIL_RE.test(content)) {
+        nudge +=
+          '\n\nHeads up: because it posted as a normal message, your email address ' +
+          'is visible to this channel. You may want to delete it.';
+      }
+
+      await message.reply({ content: nudge });
+    } catch (error) {
+      // Never let a nudge failure (missing permissions, deleted message,
+      // rate limit) bubble up and take down the gateway connection.
+      console.error('[messageCreate] Error sending plain-text command nudge:', error);
     }
   });
 
