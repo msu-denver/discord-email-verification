@@ -423,6 +423,96 @@ describe('handleVerifyCodeCommand after a restart', () => {
   });
 });
 
+// ---------- Throttle across a restart ----------
+//
+// The 5-minute /verify throttle used to read only the in-memory map, so a
+// restart handed anyone who had just requested a code a free extra one.
+
+describe('handleVerifyCommand throttle after a restart', () => {
+  it('throttles using the stored timestamp when the map is empty', async () => {
+    mockStorage.getPendingCode.mockResolvedValue({
+      email: 'user@test.edu',
+      code: 'RECENT12',
+      attempts: 0,
+      createdAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('user@test.edu');
+
+    await handleVerifyCommand(interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Please wait') })
+    );
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it('allows a new code once the stored request is older than the window', async () => {
+    mockStorage.getPendingCode.mockResolvedValue({
+      email: 'user@test.edu',
+      code: 'OLDREQ12',
+      attempts: 0,
+      createdAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('user@test.edu');
+
+    await handleVerifyCommand(interaction);
+
+    expect(mockSendEmail).toHaveBeenCalled();
+  });
+
+  it('does not throttle a user who has never requested a code', async () => {
+    mockStorage.getPendingCode.mockResolvedValue(null);
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('user@test.edu');
+
+    await handleVerifyCommand(interaction);
+
+    expect(mockSendEmail).toHaveBeenCalled();
+  });
+
+  it('declines to throttle when the stored timestamp is unreadable', async () => {
+    // Opposite of the expiry check on purpose: a corrupt timestamp must not
+    // lock a real student out of verifying.
+    mockStorage.getPendingCode.mockResolvedValue({
+      email: 'user@test.edu',
+      code: 'BADTIME1',
+      attempts: 0,
+      createdAt: 'not-a-timestamp',
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('user@test.edu');
+
+    await handleVerifyCommand(interaction);
+
+    expect(mockSendEmail).toHaveBeenCalled();
+  });
+
+  it('prefers the in-memory entry and skips the storage read', async () => {
+    pendingVerifications.set('user-1', {
+      email: 'user@test.edu',
+      code: 'INMEM123',
+      timestamp: Date.now() - 60 * 1000,
+      attempts: 0,
+    });
+
+    const interaction = createMockInteraction();
+    interaction.options.getString.mockReturnValue('user@test.edu');
+
+    await handleVerifyCommand(interaction);
+
+    expect(mockStorage.getPendingCode).not.toHaveBeenCalled();
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Please wait') })
+    );
+  });
+});
+
 // ---------- Durable attempt tracking ----------
 
 describe('pending-code persistence', () => {

@@ -83,10 +83,24 @@ export async function handleVerifyCommand(interaction) {
     });
   }
 
-  // Throttle — 5 minutes between requests
-  if (pendingVerifications.has(interaction.user.id)) {
-    const existing = pendingVerifications.get(interaction.user.id);
-    const elapsed = Date.now() - existing.timestamp;
+  // Throttle — 5 minutes between requests.
+  //
+  // Falls back to storage on a map miss for the same reason /verifycode does:
+  // a restart empties the map, and consulting it alone would hand every user
+  // whose request preceded the restart a free extra code and email.
+  let lastRequestedAt = pendingVerifications.get(interaction.user.id)?.timestamp;
+  if (lastRequestedAt === undefined) {
+    const stored = await storage.getPendingCode(interaction.user.id);
+    // An unreadable createdAt yields NaN, which loses the comparison below and
+    // so declines to throttle. That is the opposite of the expiry check in
+    // handleVerifyCodeCommand, which treats NaN as already expired, and both
+    // point the same way on purpose: a corrupt record must never leave a real
+    // student unable to verify. Do not "fix" this into a throttling default.
+    if (stored) lastRequestedAt = Date.parse(stored.createdAt);
+  }
+
+  if (lastRequestedAt !== undefined) {
+    const elapsed = Date.now() - lastRequestedAt;
 
     if (elapsed < 5 * 60 * 1000) {
       const timeLeft = formatTimeLeft(5 * 60 * 1000 - elapsed);
