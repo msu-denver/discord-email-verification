@@ -433,7 +433,12 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                   - logs:DescribeLogStreams
-                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ContainerLogGroup}:*'
+                # DescribeLogStreams is a log-group action, so CloudWatch Logs
+                # authorizes it only against the bare log-group ARN. The ':*'
+                # stream form covers CreateLogStream and PutLogEvents.
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ContainerLogGroup}'
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ContainerLogGroup}:*'
       Tags:
         - Key: Project
           Value: c3-lab
