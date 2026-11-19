@@ -6,7 +6,7 @@
  * @license MIT
  */
 
-import { MessageFlags } from 'discord.js';
+import { Events, MessageFlags } from 'discord.js';
 import {
   VERIFICATION_CHANNEL_ID,
   QUARANTINE_ROLE_ID,
@@ -40,8 +40,11 @@ const LOOKS_LIKE_EMAIL_RE = /\S+@\S+\.\S+/;
  * @param {import('discord.js').Client} client
  */
 export default function setupEventHandlers(client) {
-  // Bot ready
-  client.once('ready', async () => {
+  // Bot ready. discord.js v14 emits the old 'ready' name only as a deprecated
+  // alias, and v15 removes it. A handler on the old name never runs there,
+  // so the heartbeat below never starts and the container reports unhealthy
+  // while the bot is connected.
+  client.once(Events.ClientReady, async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
     // Dynamic import to avoid circular dependency at module load time

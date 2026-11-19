@@ -78,7 +78,7 @@ export function isValidEmail(email) {
 }
 
 // Heartbeat path that the Docker HEALTHCHECK reads. Written by the bot's
-// 'ready' event handler on a setInterval; if the WebSocket disconnects, the
+// clientReady event handler on a setInterval; if the WebSocket disconnects, the
 // file's mtime stops advancing and the healthcheck eventually fails.
 //
 // The container runs --read-only with tmpfs mounted at /tmp, so this path
