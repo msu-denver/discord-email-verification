@@ -136,7 +136,8 @@ src/
 
 ```
 infrastructure/
-  template.yaml     CloudFormation template for AWS deployment
+  bootstrap.yaml    CloudFormation: OIDC provider, deploy role, ECR (once per account)
+  app.yaml          CloudFormation: the bot's runtime stack (EC2, DynamoDB, logs, SES events)
 scripts/
   localstack/
     seed_ses.sh     Auto-seeds SES email identities for local dev
@@ -152,31 +153,14 @@ docker-compose.yml  LocalStack container for local SES simulation
 
 ### Using CloudFormation
 
-The `infrastructure/template.yaml` CloudFormation template creates everything needed:
+Production runs the bot as a Docker container (built from `Dockerfile.ecs`) on EC2, from two CloudFormation stacks:
 
-- DynamoDB table
-- SES email identity
-- EC2 instance (t3.micro) with PM2
-- IAM role with least-privilege permissions
-- Security group (SSH only)
-- SSM Parameter Store for the bot token
+- `infrastructure/bootstrap.yaml`: deployed once per account. GitHub OIDC provider, the GitHub Actions deploy role, and the ECR repository.
+- `infrastructure/app.yaml`: the runtime. DynamoDB table, EC2 instance and IAM role, security group, CloudWatch log group, and the SES configuration set with its bounce and complaint topics.
 
-```bash
-aws cloudformation deploy \
-  --template-file infrastructure/template.yaml \
-  --stack-name discord-verification-bot \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides \
-    KeyPairName=your-key-pair \
-    SESFromEmail=verification@yourdomain.edu \
-    DiscordBotToken=your-bot-token \
-    ServerID=your-server-id \
-    QuarantineRoleID=your-role-id \
-    VerifiedRoleID=your-role-id \
-    AdminRoleID=your-role-id \
-    VerificationChannelID=your-channel-id \
-    WelcomeChannelID=your-channel-id
-```
+Bot secrets and settings live in SSM Parameter Store (`scripts/aws/seed-ssm-parameters.sh`), never in stack parameters. After the stacks exist, every merge to `main` builds the image and redeploys it over SSM. CI does not apply CloudFormation, so a template change needs a manual stack update.
+
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) is the runbook: first-time setup, routine deploys, rollback, logs, and SES monitoring.
 
 ### SES Sandbox
 
