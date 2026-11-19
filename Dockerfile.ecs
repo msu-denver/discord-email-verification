@@ -51,7 +51,7 @@ USER node
 # No EXPOSE needed.
 
 # Healthcheck: verify the bot is actually connected to Discord, not just
-# that Node is running. The bot's 'ready' handler writes a heartbeat file
+# that Node is running. The bot's clientReady handler writes a heartbeat file
 # every 30s while client.isReady() — a silent gateway disconnect (lost
 # WebSocket, Discord-side outage) stops the writes, the file goes stale,
 # and the healthcheck flips after 3 consecutive failures (~3 min).
@@ -59,7 +59,7 @@ USER node
 # Threshold (90s) is 3x the write cadence to absorb a single missed tick
 # from event-loop blocking or transient I/O without flipping the check.
 # start-period (90s) covers cold-start: storage init + Discord login +
-# first 'ready' fire before checks count toward retry exhaustion.
+# first clientReady fire before checks count toward retry exhaustion.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
   CMD node -e "const s=require('fs').statSync('/tmp/discord-bot-heartbeat'); process.exit(Date.now() - s.mtimeMs > 90000 ? 1 : 0)" || exit 1
 

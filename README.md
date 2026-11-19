@@ -126,7 +126,7 @@ src/
   config.js         Centralized configuration from environment variables
   emailer.js        Amazon SES email delivery
   storage.js        DynamoDB + LocalStorage backends (strategy pattern)
-  events.js         Discord event handlers (ready, memberJoin, interactions)
+  events.js         Discord event handlers (clientReady, memberJoin, interactions)
   utils.js          Utility functions (code generation, validation)
   commands/
     index.js        Slash command registration with Discord API
