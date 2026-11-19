@@ -28,11 +28,11 @@ Full local-development walkthrough is in the main [README](../README.md). Archit
 3. **Add or update tests.** New code paths need tests; refactors should keep coverage steady. The full suite is in `tests/` (Vitest).
 4. Run locally before pushing:
    ```bash
-   npm test                 # all tests pass on Node 20 + 22
+   npm test                 # all tests pass on Node 20, 22 and 26
    node --check src/*.js src/commands/*.js
    npm run audit            # 0 high-severity production vulns
    ```
-5. Open a PR against `develop`. CI runs on Node 20 and 22, lints, audits dependencies, runs CodeQL, and reviews any new dependencies. Deploy to AWS only fires on push to `main`.
+5. Open a PR against `develop`. CI runs on Node 20, 22 and 26, lints, audits dependencies, runs CodeQL, and reviews any new dependencies. Deploy to AWS only fires on push to `main`.
 6. Files under `.github/`, `infrastructure/`, `scripts/`, `Dockerfile*`, and `package*.json` require a [CODEOWNERS](./CODEOWNERS) review (currently `@daniel-pittman`). Other paths just need any maintainer's approval.
 
 ## Automated reviews

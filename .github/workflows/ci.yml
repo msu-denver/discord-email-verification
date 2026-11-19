@@ -58,7 +58,7 @@ jobs:
         run: npm test
 
       - name: Run tests with coverage
-        if: matrix.node-version == 22
+        if: matrix.node-version == 26
         run: npm run test:coverage
 
       # Surface known CVEs in production dependencies. The script uses
@@ -67,7 +67,7 @@ jobs:
       # ship to production. We've established a clean baseline (0 vulns
       # as of vitest 4 / dotenv 17 / SDK upgrades) so this can fail builds.
       - name: Audit dependencies
-        if: matrix.node-version == 22
+        if: matrix.node-version == 26
         run: npm run audit
 
   # ------------------------------------------------------------------
