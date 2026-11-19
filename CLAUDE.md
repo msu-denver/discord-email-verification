@@ -15,7 +15,7 @@ The PR review workflow enforces two rules the automated reviewer applies on ever
 
 ## Tech Stack
 
-- **Runtime**: Node.js 22, ES modules (`"type": "module"` in package.json)
+- **Runtime**: Node.js 26, ES modules (`"type": "module"` in package.json)
 - **Discord**: discord.js v14 (slash commands, GatewayIntentBits, Partials)
 - **Email**: Amazon SES via `@aws-sdk/client-ses`
 - **Storage**: DynamoDB via `@aws-sdk/lib-dynamodb` (production) or local JSON files (development)
