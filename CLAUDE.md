@@ -21,7 +21,7 @@ The PR review workflow enforces two rules the automated reviewer applies on ever
 - **Storage**: DynamoDB via `@aws-sdk/lib-dynamodb` (production) or local JSON files (development)
 - **Testing**: Vitest with `@vitest/coverage-v8`
 - **Local dev**: LocalStack via Docker Compose for SES simulation
-- **Infrastructure**: AWS CloudFormation (`infrastructure/template.yaml`)
+- **Infrastructure**: AWS CloudFormation (`infrastructure/bootstrap.yaml` once per account, `infrastructure/app.yaml` for the runtime stack); the bot runs as a Docker container from `Dockerfile.ecs`. Runbook: `docs/DEPLOYMENT.md`
 
 ## Project Structure
 
@@ -38,7 +38,7 @@ src/
     verify.js         /verify and /verifycode handlers
     admin.js          /admin subcommand handlers
 tests/                Mirrors src/ structure
-infrastructure/       CloudFormation template
+infrastructure/       CloudFormation: bootstrap.yaml, app.yaml
 scripts/localstack/   SES seed script for local dev
 ```
 
