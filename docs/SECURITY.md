@@ -113,7 +113,7 @@ What the bot uses at runtime.
 | Container runs as non-root | `USER node` in Dockerfile |
 | Container `--read-only` | tmpfs for `/tmp` only |
 | `npm ci --ignore-scripts` in image build | belt-and-suspenders for postinstall script defense |
-| Pinned base image digest | `node:22-alpine@sha256:...` not just the tag |
+| Pinned base image digest | `node:26-alpine@sha256:...` not just the tag |
 | ECR `ScanOnPush: true` | every push scanned for known CVEs |
 
 ### Layer 7: Secrets management
