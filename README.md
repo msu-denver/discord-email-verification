@@ -139,8 +139,16 @@ infrastructure/
   bootstrap.yaml    CloudFormation: OIDC provider, deploy role, ECR (once per account)
   app.yaml          CloudFormation: the bot's runtime stack (EC2, DynamoDB, logs, SES events)
 scripts/
+  aws/
+    seed-ssm-parameters.sh  Writes bot config and secrets to SSM Parameter Store
+  build/
+    push-to-ecr.sh          Builds Dockerfile.ecs and pushes it to ECR (CI deploy)
+    deploy-to-ec2.sh        Runs ec2/deploy.sh on the instance over SSM (CI deploy)
+    aws-cli-login.sh        Logs Docker into the bot's ECR registry (local or CI)
+  ec2/
+    deploy.sh               On the instance: pulls an image tag and restarts the container
   localstack/
-    seed_ses.sh     Auto-seeds SES email identities for local dev
+    seed_ses.sh             Auto-seeds SES email identities for local dev
 docker-compose.yml  LocalStack container for local SES simulation
 ```
 
@@ -158,7 +166,7 @@ Production runs the bot as a Docker container (built from `Dockerfile.ecs`) on E
 - `infrastructure/bootstrap.yaml`: deployed once per account. GitHub OIDC provider, the GitHub Actions deploy role, and the ECR repository.
 - `infrastructure/app.yaml`: the runtime. DynamoDB table, EC2 instance and IAM role, security group, CloudWatch log group, and the SES configuration set with its bounce and complaint topics.
 
-Bot secrets and settings live in SSM Parameter Store (`scripts/aws/seed-ssm-parameters.sh`), never in stack parameters. After the stacks exist, every merge to `main` builds the image and redeploys it over SSM. CI does not apply CloudFormation, so a template change needs a manual stack update.
+Bot secrets and settings live in SSM Parameter Store (`scripts/aws/seed-ssm-parameters.sh`). The one setting the stack also needs is the sender address: `app.yaml`'s `SesFromEmail` parameter must match SSM's `SES_FROM_EMAIL`, because the instance role may send only from that address. After the stacks exist, every merge to `main` builds the image and redeploys it over SSM. CI does not apply CloudFormation, so a template change needs a manual stack update.
 
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) is the runbook: first-time setup, routine deploys, rollback, logs, and SES monitoring.
 
