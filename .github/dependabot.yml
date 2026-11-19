@@ -7,9 +7,14 @@
 # Reference: https://docs.github.com/code-security/dependabot
 
 version: 2
+# Every ecosystem waits 7 days after a release before Dependabot proposes it
+# (cooldown): a compromised or mistaken release is usually caught within days.
+# Security updates are not delayed.
 updates:
   # Node.js dependencies
   - package-ecosystem: npm
+    cooldown:
+      default-days: 7
     directory: "/"
     schedule:
       interval: weekly
@@ -29,6 +34,8 @@ updates:
   # GitHub Actions used in our workflows
   # (These are a known attack vector — compromised actions can exfil secrets.)
   - package-ecosystem: github-actions
+    cooldown:
+      default-days: 7
     directory: "/"
     schedule:
       interval: weekly
@@ -46,6 +53,8 @@ updates:
 
   # Docker base images (Dockerfile + Dockerfile.ecs at the repo root)
   - package-ecosystem: docker
+    cooldown:
+      default-days: 7
     directory: "/"
     schedule:
       interval: weekly
