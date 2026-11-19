@@ -273,17 +273,20 @@ describe('clientReady', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers on the event name a real discord.js Client emits', async () => {
-    // Checked against the real library so a rename upstream fails here
-    // rather than in production, where the handler would silently never run.
-    const { Client, Events } = await vi.importActual('discord.js');
+  it('runs when a real discord.js Client signals ready', async () => {
+    // Driven through the library's own ready trigger, so a change upstream to
+    // the event name it emits fails here rather than in production, where the
+    // handler would silently never run and the heartbeat would never start.
+    const { Client } = await vi.importActual('discord.js');
     const setupEventHandlers = await loadSetupEventHandlers();
+    const { writeHeartbeat } = await import('../src/utils.js');
     const client = new Client({ intents: [] });
     try {
       setupEventHandlers(client);
-      expect(Events.ClientReady).toBe('clientReady');
-      expect(client.listenerCount(Events.ClientReady)).toBe(1);
       expect(client.listenerCount('ready')).toBe(0);
+      client.user = { tag: 'Bot#0001' };
+      client.ws.triggerClientReady();
+      await vi.waitFor(() => expect(writeHeartbeat).toHaveBeenCalledTimes(1));
     } finally {
       await client.destroy();
     }
