@@ -41,7 +41,7 @@ A Discord bot that verifies members using their educational email addresses. Bui
 
 ## Prerequisites
 
-- **Node.js** 20+ (22 recommended)
+- **Node.js** 20+ (26 recommended; the production image runs 26)
 - **Docker** (for local email testing with LocalStack)
 - **AWS Account** with SES and DynamoDB access (production only)
 - **Discord Bot Application** created in the [Developer Portal](https://discord.com/developers/applications)
