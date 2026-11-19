@@ -2,7 +2,7 @@
  * Tests for src/events.js
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---------- Helpers ----------
 
@@ -232,5 +232,87 @@ describe('messageCreate plain-text command nudge', () => {
     message.reply.mockRejectedValue(new Error('Missing Permissions'));
 
     await expect(handler(message)).resolves.toBeUndefined();
+  });
+});
+
+// ---------- clientReady (startup and heartbeat) ----------
+
+describe('clientReady', () => {
+  /** Mock client with the fields the startup handler reads. */
+  function createReadyClient({ fetchCommands } = {}) {
+    const client = createMockClient();
+    client.user = { tag: 'Bot#0001' };
+    client.guilds = {
+      cache: new Map([
+        ['server-1', {
+          commands: {
+            fetch: fetchCommands ?? vi.fn().mockResolvedValue(new Map([['verify', {}]])),
+          },
+        }],
+      ]),
+    };
+    return client;
+  }
+
+  async function runReadyHandler(client) {
+    const setupEventHandlers = await loadSetupEventHandlers();
+    const { writeHeartbeat } = await import('../src/utils.js');
+    setupEventHandlers(client);
+    await client.handlers.get('clientReady')();
+    return writeHeartbeat;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('registers on the event name a real discord.js Client emits', async () => {
+    // Checked against the real library so a rename upstream fails here
+    // rather than in production, where the handler would silently never run.
+    const { Client, Events } = await vi.importActual('discord.js');
+    const setupEventHandlers = await loadSetupEventHandlers();
+    const client = new Client({ intents: [] });
+    try {
+      setupEventHandlers(client);
+      expect(Events.ClientReady).toBe('clientReady');
+      expect(client.listenerCount(Events.ClientReady)).toBe(1);
+      expect(client.listenerCount('ready')).toBe(0);
+    } finally {
+      await client.destroy();
+    }
+  });
+
+  it('writes the heartbeat at once and again on each interval', async () => {
+    const writeHeartbeat = await runReadyHandler(createReadyClient());
+    expect(writeHeartbeat).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(30 * 1000);
+    expect(writeHeartbeat).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops advancing the heartbeat while the gateway is not ready', async () => {
+    const client = createReadyClient();
+    const writeHeartbeat = await runReadyHandler(client);
+
+    client.isReady = () => false;
+    vi.advanceTimersByTime(90 * 1000);
+    expect(writeHeartbeat).toHaveBeenCalledTimes(1);
+  });
+
+  it('still starts the heartbeat when fetching slash commands fails', async () => {
+    const client = createReadyClient({
+      fetchCommands: vi.fn().mockRejectedValue(new Error('Missing Access')),
+    });
+    const writeHeartbeat = await runReadyHandler(client);
+
+    expect(console.error).toHaveBeenCalledWith('[ready] Error fetching commands:', expect.any(Error));
+    expect(writeHeartbeat).toHaveBeenCalledTimes(1);
   });
 });
