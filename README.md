@@ -7,9 +7,9 @@
 [![CI](https://github.com/msu-denver/discord-email-verification/actions/workflows/ci.yml/badge.svg)](https://github.com/msu-denver/discord-email-verification/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/msu-denver/discord-email-verification/actions/workflows/codeql.yml/badge.svg)](https://github.com/msu-denver/discord-email-verification/actions/workflows/codeql.yml)
 [![GitHub release](https://img.shields.io/github/v/release/msu-denver/discord-email-verification?sort=semver)](https://github.com/msu-denver/discord-email-verification/releases)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/node-22.12%2B%20%7C%2024%20%7C%2026-brightgreen)](https://nodejs.org/)
 [![discord.js](https://img.shields.io/badge/discord.js-v14-5865F2)](https://discord.js.org/)
-[![Vitest](https://img.shields.io/badge/tested%20with-vitest%204-6e9f18)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/tested%20with-vitest%205-6e9f18)](https://vitest.dev/)
 [![Deployed](https://img.shields.io/badge/deployed-AWS%20EC2%20%2B%20DynamoDB%20%2B%20SES-orange)](./docs/DEPLOYMENT.md)
 [![Security](https://img.shields.io/badge/security-OIDC%20%7C%20least--privilege%20IAM%20%7C%20SSM%20Parameter%20Store-blue)](./docs/SECURITY.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -41,7 +41,7 @@ A Discord bot that verifies members using their educational email addresses. Bui
 
 ## Prerequisites
 
-- **Node.js** 20+ (26 recommended; the production image runs 26)
+- **Node.js** 22.12 or newer on an LTS line (22, 24 or 26), the range vitest 5 supports. 26 is recommended; the production image runs 26.
 - **Docker** (for local email testing with LocalStack)
 - **AWS Account** with SES and DynamoDB access (production only)
 - **Discord Bot Application** created in the [Developer Portal](https://discord.com/developers/applications)
